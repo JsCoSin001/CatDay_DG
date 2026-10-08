@@ -1,0 +1,1 @@
+(function(global){'use strict';global.B3State={user:null,plans:[],selectedPlan:null,showAll:false,worklist:[],page:1,scan:null,context:null,action:null,groupId:null,detailId:null,endValue:'',direction:1,firstCutConfirmed:false,singleQrModal:null,hasPlanScope:function(){return this.showAll||!!this.selectedPlan;}};})(window);
