@@ -33,9 +33,118 @@ const fmt=(v)=>v===null||v===undefined?'':String(v);
 
 document.addEventListener('DOMContentLoaded',init);
 async function init(){bindLogin();bindAccount();bindPlanSearch();bindPagination();bindQr();bindSheet();await withPageLoading('Đang kiểm tra phiên đăng nhập...',async()=>{try{const s=await api.session();showApp(s.user);resetPlanScope();}catch(_){showLogin();}},'auth');}
-function alertUser(type,msg){const h=$('#app-alert-host');if(!h)return;const d=document.createElement('div');d.className=`alert alert-${type==='danger'?'danger':'success'} alert-dismissible fade show`;d.innerHTML=`${esc(msg)}<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Đóng"></button>`;h.appendChild(d);setTimeout(()=>d.remove(),5000);}
-function showLogin(){state.user=null;$('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');}
-function showApp(user){state.user=user;$('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');$('#desktop-account-name').textContent=user.name||user.username;}
+// B3 popup notifications: UI-only lifecycle, independent of Bootstrap JavaScript.
+const popupAlerts=[];
+const POPUP_ENTER_MS=250, POPUP_EXIT_MS=180, POPUP_REPEAT_MS=2000, POPUP_MAX=3;
+function popupReducedMotion(){return !!window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;}
+function popupReflow(host,mutate){
+    const before=new Map();
+    if(!popupReducedMotion())for(const item of popupAlerts){
+        if(item.status==='visible'&&item.element.parentElement===host&&item.element.getBoundingClientRect){
+            before.set(item,item.element.getBoundingClientRect().top);
+        }
+    }
+    mutate();
+    for(const [item,previousTop] of before){
+        if(item.status!=='visible'||item.element.parentElement!==host||!item.element.animate)continue;
+        const difference=previousTop-item.element.getBoundingClientRect().top;
+        if(Math.abs(difference)>1)item.element.animate(
+            [{transform:`translateY(${difference}px)`},{transform:'translateY(0)'}],
+            {duration:POPUP_EXIT_MS,easing:'ease-out'}
+        );
+    }
+}
+function popupRemove(item){
+    if(item.status==='removed')return;
+    clearTimeout(item.enterTimer);clearTimeout(item.timer);clearTimeout(item.exitTimer);
+    item.status='removed';
+    const index=popupAlerts.indexOf(item);if(index!==-1)popupAlerts.splice(index,1);
+    const host=item.element.parentElement;
+    if(host)popupReflow(host,()=>item.element.remove());
+}
+function popupClose(item,immediate=false){
+    if(item.status==='removed')return;
+    if(item.status==='leaving'){if(immediate)popupRemove(item);return;}
+    clearTimeout(item.enterTimer);clearTimeout(item.timer);
+    item.timer=null;item.deadline=null;item.status='leaving';
+    if(immediate||popupReducedMotion()){popupRemove(item);return;}
+    item.element.classList.remove('show');
+    item.element.classList.add('app-popup-alert-leaving');
+    item.exitTimer=setTimeout(()=>popupRemove(item),POPUP_EXIT_MS);
+}
+function popupClearAll(){for(const item of [...popupAlerts])popupClose(item,true);}
+function popupClock(item){
+    if(item.status!=='visible')return;
+    clearTimeout(item.timer);item.timer=null;
+    if(item.deadline!==null)item.remaining=Math.max(0,item.deadline-Date.now());
+    // An elapsed deadline wins even when a hover/focus is still active after a background tab resumes.
+    if(item.remaining===0){popupClose(item,document.hidden);return;}
+    if(!document.hidden&&(item.hovered||item.focused)){item.deadline=null;return;}
+    if(item.deadline===null)item.deadline=Date.now()+item.remaining;
+    item.timer=setTimeout(()=>popupClock(item),item.remaining);
+}
+document.addEventListener('visibilitychange',()=>{
+    for(const item of [...popupAlerts]){
+        if(!document.hidden&&item.status==='leaving'){popupClose(item,true);continue;}
+        if(!document.hidden&&item.status==='visible'&&item.deadline!==null&&Date.now()>=item.deadline){
+            popupClose(item,true);continue;
+        }
+        popupClock(item);
+    }
+});
+function alertUser(type,msg){
+    const host=$('#app-alert-host');if(!host)return;
+    const kind=type==='danger'?'danger':'success', content=String(msg??'');
+    const now=Date.now();
+    const previous=popupAlerts.find(item=>item.status!=='leaving'&&item.status!=='removed'&&
+        item.kind===kind&&item.content===content&&now-item.lastOccurrence<=POPUP_REPEAT_MS);
+    if(previous){
+        previous.count++;previous.lastOccurrence=now;
+        previous.message.textContent=`${content} (${previous.count} lần)`;
+        previous.remaining=kind==='danger'?8000:3000;previous.deadline=null;
+        popupAlerts.splice(popupAlerts.indexOf(previous),1);popupAlerts.unshift(previous);
+        popupReflow(host,()=>host.prepend(previous.element));
+        if(previous.status==='visible')popupClock(previous);
+        return;
+    }
+    if(popupAlerts.length>=POPUP_MAX){
+        const oldestSuccess=[...popupAlerts].reverse().find(item=>item.kind==='success'&&item.status!=='leaving');
+        popupClose(oldestSuccess||[...popupAlerts].reverse().find(item=>item.status!=='leaving')||popupAlerts[popupAlerts.length-1],true);
+    }
+    const element=document.createElement('div');
+    element.className=`alert alert-${kind} alert-dismissible app-popup-alert`;
+    element.setAttribute('role',kind==='danger'?'alert':'status');
+    const message=document.createElement('span');message.className='app-popup-alert-message';message.textContent=content;
+    const button=document.createElement('button');button.type='button';button.className='btn-close';
+    button.setAttribute('aria-label','Đóng thông báo');
+    element.appendChild(message);element.appendChild(button);
+    const item={kind,content,count:1,lastOccurrence:now,element,message,status:'entering',
+        remaining:kind==='danger'?8000:3000,deadline:null,hovered:false,focused:false,
+        enterTimer:null,timer:null,exitTimer:null};
+    button.addEventListener('click',()=>popupClose(item));
+    element.addEventListener('mouseenter',()=>{item.hovered=true;popupClock(item);});
+    element.addEventListener('mouseleave',()=>{item.hovered=false;popupClock(item);});
+    element.addEventListener('focusin',()=>{item.focused=true;popupClock(item);});
+    element.addEventListener('focusout',event=>{
+        if(event.relatedTarget&&element.contains(event.relatedTarget))return;
+        item.focused=element.contains(document.activeElement);popupClock(item);
+    });
+    popupAlerts.unshift(item);
+    popupReflow(host,()=>host.prepend(element));
+    void element.offsetWidth; // Ensure the CSS starting transform is painted before entering.
+    element.classList.add('show');
+    if(popupReducedMotion()){
+        item.status='visible';popupClock(item);
+    }else{
+        item.enterTimer=setTimeout(()=>{
+            if(item.status!=='entering')return;
+            item.status='visible';popupClock(item);
+        },POPUP_ENTER_MS);
+    }
+}
+
+function showLogin(){popupClearAll();state.user=null;$('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');}
+function showApp(user){popupClearAll();state.user=user;$('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');$('#desktop-account-name').textContent=user.name||user.username;}
 function bindLogin(){const f=$('#login-form');if(!f)return;f.addEventListener('submit',async e=>{e.preventDefault();await withPageLoading('Đang đăng nhập...',async()=>{try{const r=await api.login($('#login-username').value.trim(),$('#login-password').value);showApp(r.user);resetPlanScope();}catch(err){alertUser('danger',err.message);}},'auth');});}
 function resetPlanScope(){
     clearTimeout(planSearchTimer);planRequestVersion++;worklistRequestVersion++;
@@ -124,6 +233,7 @@ async function changePlanScope(plan,all){
             alertUser('danger','Kế hoạch đã hoàn thành, vui lòng chọn kế hoạch khác.');
             return;
         }
+        if(state.showAll!==all||(!all&&String(state.selectedPlan?.id??'')!==String(plan?.id??'')))popupClearAll();
         state.selectedPlan=plan;state.showAll=all;state.worklist=r.rows||[];state.page=1;
         if(input)input.value=all?'':plan.ma_ke_hoach;
         renderTable();

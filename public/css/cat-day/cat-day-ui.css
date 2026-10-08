@@ -383,41 +383,55 @@ button { touch-action: manipulation; }
 @keyframes bottomSheetIn { from { transform: translateY(28px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 
-/* Popup notifications: Bootstrap Alert, fixed top-center above app/scanner/bottom-sheet. */
+/* B3 notifications: top-center, interactive cards above scanner, decision overlay and Loading. */
 .app-alert-host {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top));
     left: 50%;
     z-index: 2147483600;
-    width: min(560px, calc(100vw - 24px));
+    width: min(560px, calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
     transform: translateX(-50%);
     display: grid;
     gap: 8px;
     pointer-events: none;
+    scrollbar-width: thin;
 }
 .app-popup-alert {
     pointer-events: auto;
     margin: 0;
+    min-width: 0;
     border-width: 1px;
     border-radius: 10px;
     box-shadow: 0 14px 34px rgba(15, 23, 42, .18);
     font-size: .92rem;
     font-weight: 650;
     opacity: 0;
-    transform: translateY(-14px) scale(.985);
-    transition: opacity .24s ease, transform .28s cubic-bezier(.2, .8, .2, 1);
+    transform: translateY(-12px);
+    transition: opacity .25s ease, transform .25s cubic-bezier(.2, .8, .2, 1);
 }
 .app-popup-alert.show {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
 }
 .app-popup-alert.app-popup-alert-leaving {
     opacity: 0;
-    transform: translateY(-10px) scale(.985);
+    transform: translateY(-10px);
+    transition-duration: .18s;
+    pointer-events: none;
 }
 .app-popup-alert-message {
+    display: block;
+    max-height: min(25dvh, 240px);
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
     padding-right: 10px;
     line-height: 1.45;
+}
+@media (prefers-reduced-motion: reduce) {
+    .app-popup-alert, .app-popup-alert.app-popup-alert-leaving { transition: none; }
 }
 
 /* B3 UI PROTOTYPE ONLY: controls used to preview success/failure states without a real scan. */
@@ -779,7 +793,7 @@ button { touch-action: manipulation; }
 .b3-decision-overlay {
     position: fixed;
     inset: 0;
-    z-index: 2147483700;
+    z-index: 2147483400;
     display: grid;
     place-items: center;
     padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
@@ -980,7 +994,7 @@ button { touch-action: manipulation; }
 .b3-page-loading {
     position: fixed;
     inset: 0;
-    z-index: 2147483750;
+    z-index: 2147483500;
     display: grid;
     place-items: center;
     padding: 18px;

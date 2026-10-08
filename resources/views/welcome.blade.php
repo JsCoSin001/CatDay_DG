@@ -4,7 +4,7 @@
 
 @section('content')
 {{-- B3 UI: vùng popup thông báo dùng Bootstrap Alert. Đây là UI chung, không chứa logic nghiệp vụ. --}}
-<div id="app-alert-host" class="app-alert-host" aria-live="polite" aria-atomic="true"></div>
+<div id="app-alert-host" class="app-alert-host" aria-live="off" aria-atomic="false"></div>
 {{-- B3: Loading hiển thị sau 500ms khi yêu cầu dữ liệu kéo dài. --}}
 <div id="b3-page-loading" class="b3-page-loading" role="status" aria-live="polite" aria-atomic="true" hidden>
     <div class="b3-page-loading-card">
