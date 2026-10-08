@@ -5,6 +5,14 @@
 @section('content')
 {{-- B3 UI: vùng popup thông báo dùng Bootstrap Alert. Đây là UI chung, không chứa logic nghiệp vụ. --}}
 <div id="app-alert-host" class="app-alert-host" aria-live="polite" aria-atomic="true"></div>
+{{-- B3: Loading hiển thị sau 500ms khi yêu cầu dữ liệu kéo dài. --}}
+<div id="b3-page-loading" class="b3-page-loading" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div class="b3-page-loading-card">
+        <span class="b3-loading-spinner" aria-hidden="true"></span>
+        <strong id="b3-page-loading-message">Đang tải dữ liệu...</strong>
+        <span>Vui lòng chờ trong khi hệ thống xử lý.</span>
+    </div>
+</div>
 
 <div id="login-screen" class="login-screen" aria-hidden="false">
     <div class="login-card">
@@ -87,17 +95,18 @@
                                 aria-expanded="false"
                                 aria-controls="plan-options"
                             >
-                            <button id="plan-toggle" class="plan-toggle" type="button" aria-label="Hiển thị danh sách kế hoạch">⌄</button>
+                            <span class="plan-search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></span>
                         </div>
                         <div id="plan-options" class="plan-options" role="listbox" hidden></div>
+                        <div id="b3-plan-loading" class="b3-plan-loading" role="status" aria-live="polite" hidden>
+                            <span class="b3-loading-spinner" aria-hidden="true"></span>
+                            <span>Đang tìm kế hoạch...</span>
+                        </div>
                     </div>
                 </div>
 
                 <div class="col-12 col-md-5 col-xl-6 all-plan-column">
-                    <div class="form-check app-check">
-                        <input id="search-all" class="form-check-input" type="checkbox">
-                        <label class="form-check-label" for="search-all">Tìm toàn bộ kế hoạch</label>
-                    </div>
+                    <button id="search-all" type="button" class="btn btn-outline-primary app-control">Tìm toàn bộ kế hoạch</button>
                 </div>
             </div>
         </section>
@@ -125,7 +134,7 @@
             <div class="result-toolbar">
                 <div>
                     <h2 id="result-title">Danh sách kế hoạch</h2>
-                    <p id="result-summary" class="result-summary">Chọn mã kế hoạch hoặc bật “Tìm toàn bộ kế hoạch”.</p>
+                    <p id="result-summary" class="result-summary">Chọn mã kế hoạch hoặc nhấn “Tìm toàn bộ kế hoạch”.</p>
                 </div>
                 <div class="swipe-hint" aria-hidden="true">← Vuốt ngang bảng →</div>
             </div>
