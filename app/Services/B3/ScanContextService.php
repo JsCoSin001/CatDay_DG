@@ -12,7 +12,9 @@ class ScanContextService
 
     public function resolve(string $rawQr, ?int $planId): array
     {
-        $source=$this->qr->resolve($rawQr);
+        // Resolve exhausted full-reel MaBin for product identity. CUT eligibility
+        // still depends on the scanned MaBin and the planned standard length.
+        $source=$this->qr->resolve($rawQr, true);
         if($planId){
             $state=$this->plans->loadPlanState($planId);
             if(!$state['plan']) throw B3Exception::make('PLAN_NOT_FOUND','Không tìm thấy kế hoạch.',404);
@@ -25,6 +27,8 @@ class ScanContextService
 
         $candidate=[];
         $fullEligibilityCache = [];
+        $takeEligibilityCache = [];
+        $takeInventoryError = null;
         $matchedProduct = false;
         $matchedPartialWithoutGroup = false;
         foreach($states as $state){
@@ -44,7 +48,22 @@ class ScanContextService
                         $fullEligibilityCache[$cacheKey]=$std>0 && $this->inventory->fullActualForMaBin((string)$source['ma_bin'],$item['product_id'],$std)>0;
                     }
                     $scannedEligible=$fullEligibilityCache[$cacheKey];
-                    if($scannedEligible && max(0,$item['whole_required']-$item['whole_done'])>0) $actions[]='TAKE_WHOLE_REEL';
+                    if(max(0,$item['whole_required']-$item['whole_done'])>0){
+                        $productId=$item['product_id'];
+                        if(!array_key_exists($productId,$takeEligibilityCache)){
+                            try {
+                                $sources=$this->inventory->eligibleFullSourcesForTake($productId);
+                                $actual=array_sum(array_column($sources,'remaining'));
+                                $reserved=$this->inventory->fullReservedForProduct($productId);
+                                $takeEligibilityCache[$productId]=$actual>0 && $actual>=$reserved;
+                            } catch (B3Exception $error) {
+                                // Malformed TAKE inventory must not hide an otherwise valid CUT action.
+                                $takeInventoryError=$error;
+                                $takeEligibilityCache[$productId]=false;
+                            }
+                        }
+                        if($takeEligibilityCache[$productId]) $actions[]='TAKE_WHOLE_REEL';
+                    }
                     if($scannedEligible && count($groups)>0) $actions[]='CUT_FULL_REEL';
                 }elseif(count($groups)>0){
                     $actions[]='CUT_PARTIAL_REEL';
@@ -54,6 +73,7 @@ class ScanContextService
             }
         }
         if(!$candidate){
+            if($takeInventoryError) throw $takeInventoryError;
             if($matchedPartialWithoutGroup) throw B3Exception::make('NO_ELIGIBLE_GROUP','Không còn nhóm cắt phù hợp với cuộn này.',422);
             if($matchedProduct) throw B3Exception::make('NO_AVAILABLE_ACTION','Sản phẩm này không còn công việc phù hợp cần thực hiện.',422);
             throw B3Exception::make($planId?'QR_NOT_IN_PLAN':'NO_MATCHING_PLAN',$planId?'Sản phẩm quét không thuộc kế hoạch đang thực hiện.':'Không có kế hoạch phù hợp với sản phẩm vừa quét.',422);

@@ -24,7 +24,9 @@ class ExecutionService
     {
         return $this->tx->run(function() use($rawQr,$planId,$itemId,$token,$actor){
             if($this->exec->operationExists($token)) throw B3Exception::make('DUPLICATE_REQUEST','Thao tác này đã được ghi nhận trước đó.',409);
-            $source=$this->qr->resolve($rawQr);
+            // TAKE identifies the product through the QR; the scanned MaBin need not have stock.
+            // Partial reels are still resolved first and must never fall back to full reels.
+            $source=$this->qr->resolve($rawQr, true);
             if($source['source_type']!=='CUON_CHAN') throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
             $item=$this->plans->item($itemId); $plan=$this->plans->planForItem($itemId);
             if(!$item||!$plan) throw B3Exception::make('PLAN_NOT_FOUND','Không tìm thấy kế hoạch.',404);
@@ -33,14 +35,14 @@ class ExecutionService
             if((int)$item['DanhSachMaSP_ID']!==$source['product_id']) throw B3Exception::make('QR_NOT_IN_PLAN','Sản phẩm quét không thuộc kế hoạch đang thực hiện.',422);
             $done=(int)\Illuminate\Support\Facades\DB::table('LichSuLayCuon')->where('KeHoachHang_ID',$itemId)->sum('SoLuong');
             if($done >= (int)$item['SoLuongCuonCanLay']) throw B3Exception::make('PLAN_REQUIREMENT_COMPLETED','Số lượng lấy nguyên của sản phẩm này đã hoàn thành.',409);
-            $std=(int)($item['ChieuDai1Cuon_KeHoach']??0); if($std<=0) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
-            $scannedActual=$this->inventory->fullActualForMaBin((string)$source['ma_bin'],(int)$item['DanhSachMaSP_ID'],$std);
-            if($scannedActual<=0) throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này không còn khả dụng để thực hiện.',409);
-            $actual=$this->inventory->fullActualForProduct((int)$item['DanhSachMaSP_ID'],$std);
+            // Whole reels are reserved and consumed by product, independent of MaBin/length.
+            // The first eligible source is FIFO; strict mode refuses inconsistent negative stock.
+            $sources=$this->inventory->eligibleFullSourcesForTake((int)$item['DanhSachMaSP_ID']);
+            $actual=array_sum(array_column($sources,'remaining'));
             $reserved=$this->inventory->fullReservedForProduct((int)$item['DanhSachMaSP_ID']);
             if($actual<=0) throw B3Exception::make('INSUFFICIENT_FULL_STOCK','Không còn đủ cuộn chẵn để thực hiện.',409);
             if($actual<$reserved) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
-            $fifo=$this->inventory->fifoFullSourceForProduct((int)$item['DanhSachMaSP_ID'],$std);
+            $fifo=$sources[0]??null;
             if(!$fifo) throw B3Exception::make('INSUFFICIENT_FULL_STOCK','Không còn đủ cuộn chẵn để thực hiện.',409);
             $this->exec->insertWhole($itemId,(int)$fifo['id'],$actor->username,$token);
             return $this->resultForPlan($planId);

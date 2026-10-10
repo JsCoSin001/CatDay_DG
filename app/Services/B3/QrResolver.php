@@ -23,7 +23,7 @@ class QrResolver
         return ['kind'=>'PLAIN','raw'=>$raw,'ma_bin'=>null];
     }
 
-    public function resolve(string $rawQr): array
+    public function resolve(string $rawQr, bool $allowExhaustedFull = false): array
     {
         $raw=trim($rawQr);
         if($raw==='') throw B3Exception::make('QR_INVALID_FORMAT','Mã QR không đúng định dạng.');
@@ -52,7 +52,10 @@ class QrResolver
         }
         $full=$this->inventory->fullByMaBin($parsed['ma_bin']);
         if(!$full) throw B3Exception::make('QR_SOURCE_NOT_FOUND','Không tìm thấy dữ liệu nhập kho phù hợp với mã quét.',404);
-        if((int)($full['actual']??0)<=0) throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này không còn khả dụng để thực hiện.',409);
+        if($allowExhaustedFull && $this->inventory->fullProductIdsForMaBin($parsed['ma_bin']) !== [(int)$full['product_id']]) {
+            throw B3Exception::make('QR_SOURCE_NOT_USABLE','Mã QR không xác định được duy nhất sản phẩm.',409);
+        }
+        if(!$allowExhaustedFull && (int)($full['actual']??0)<=0) throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này không còn khả dụng để thực hiện.',409);
         return ['source_type'=>'CUON_CHAN','raw_qr'=>$parsed['raw'],'ma_bin'=>$parsed['ma_bin'],'product_id'=>(int)$full['product_id'],'tt_thanh_pham_id'=>(int)$full['tt_thanh_pham_id'],'ton_cuon_le_id'=>null,'full'=>$full];
     }
 }

@@ -254,7 +254,7 @@ button { touch-action: manipulation; }
     background: #fff;
 }
 .app-table {
-    min-width: 1030px;
+    min-width: 1250px;
     table-layout: fixed;
     font-size: .9rem;
 }
@@ -273,11 +273,13 @@ button { touch-action: manipulation; }
 }
 .app-table thead th:nth-child(1) { width: 150px; }
 .app-table thead th:nth-child(2) { width: 280px; }
-.app-table thead th:nth-child(3) { width: 150px; }
-.app-table thead th:nth-child(4) { width: 130px; }
+.app-table thead th:nth-child(3) { width: 130px; }
+.app-table thead th:nth-child(4) { width: 150px; }
 .app-table thead th:nth-child(5),
 .app-table thead th:nth-child(6) { width: 110px; }
 .app-table thead th:nth-child(7) { width: 150px; }
+.app-table thead th:nth-child(8) { width: 170px; }
+.app-table tbody td:nth-child(8) { white-space: nowrap; }
 .app-table tbody tr:nth-child(even) { background: #fbfdff; }
 .app-table tbody tr:hover { background: #f2f7fd; }
 .cell-plan { font-weight: 800; color: #075fb4; }

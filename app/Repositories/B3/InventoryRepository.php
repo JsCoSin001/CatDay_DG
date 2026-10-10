@@ -3,6 +3,7 @@
 namespace App\Repositories\B3;
 
 use Illuminate\Support\Facades\DB;
+use App\Support\B3\B3Exception;
 
 class InventoryRepository
 {
@@ -43,6 +44,19 @@ class InventoryRepository
         return $a;
     }
 
+    // Only TAKE needs this extra identity check: ambiguous MaBin must not
+    // silently resolve to the first product found by fullByMaBin().
+    public function fullProductIdsForMaBin(string $maBin): array
+    {
+        return DB::table('TTThanhPham as TP')
+            ->join('TTNhapKhoTP as NK', 'NK.TTThanhPham_ID', '=', 'TP.id')
+            ->join('TTCuonDay as CD', 'CD.ThongTinNhapKho_ID', '=', 'NK.id')
+            ->where('TP.MaBin', $maBin)
+            ->where('TP.NhapKho', 1)->where('TP.Temp', 0)
+            ->whereNull('CD.SoDau')->whereNull('CD.SoCuoi')
+            ->distinct()->pluck('TP.DanhSachSP_ID')->map(fn($id) => (int)$id)->all();
+    }
+
     public function fullActualForProduct(int $productId, ?int $standardLength = null): int
     {
         return array_sum(array_column($this->eligibleFullSources($productId, $standardLength), 'remaining'));
@@ -63,7 +77,14 @@ class InventoryRepository
         return $this->eligibleFullSources($productId, $standardLength, $maBin)[0] ?? null;
     }
 
-    public function eligibleFullSources(int $productId, ?int $standardLength = null, ?string $maBin = null): array
+    // TAKE must not inherit CUT's optional length/MaBin filters or its historical
+    // zero-clamping of malformed inventory. This accessor is only used by TAKE.
+    public function eligibleFullSourcesForTake(int $productId): array
+    {
+        return $this->eligibleFullSources($productId, null, null, true);
+    }
+
+    public function eligibleFullSources(int $productId, ?int $standardLength = null, ?string $maBin = null, bool $strict = false): array
     {
         $query = DB::table('TTCuonDay as CD')
             ->join('TTNhapKhoTP as NK', 'NK.id', '=', 'CD.ThongTinNhapKho_ID')
@@ -91,7 +112,11 @@ class InventoryRepository
 
         $out=[];
         foreach ($rows as $r) {
-            $remaining = max(0, (int)$r->SoCuon - (int)($take[$r->id] ?? 0) - (int)($cut[$r->id] ?? 0));
+            $rawRemaining = (int)$r->SoCuon - (int)($take[$r->id] ?? 0) - (int)($cut[$r->id] ?? 0);
+            if ($strict && ($r->SoCuon === null || (int)$r->SoCuon < 0 || $rawRemaining < 0)) {
+                throw B3Exception::make('STALE_DATA', 'Dữ liệu tồn cuộn chẵn bất thường. Vui lòng kiểm tra lại.', 409);
+            }
+            $remaining = max(0, $rawRemaining);
             if ($remaining <= 0) continue;
             $a=(array)$r; $a['remaining']=$remaining; $out[]=$a;
         }

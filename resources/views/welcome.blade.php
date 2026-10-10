@@ -145,11 +145,11 @@
                         <tr>
                             <th>Mã kế hoạch</th>
                             <th>Tên sản phẩm</th>
-                            <th>LOT</th>
                             <th class="text-end">Số lượng cuộn</th>
+                            <th class="text-end">Số cuộn cắt lẻ</th>
                             <th class="text-end">Số đầu</th>
                             <th class="text-end">Số cuối</th>
-                            <th class="text-end">Số cuộn cắt lẻ</th>
+                            <th>LOT</th>
                             <th>Tình trạng</th>
                         </tr>
                     </thead>
