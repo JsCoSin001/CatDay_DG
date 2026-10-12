@@ -32,6 +32,9 @@
       this.isOpen = false;
       this.previousBodyOverflow = "";
       this.imageBusy = false;
+      this.modalSession = 0;
+      this.resultLocked = false;
+      this.closingPromise = null;
       this.boundKeydown = (event) => {
         if (event.key === "Escape" && this.isOpen) {
           this.close();
@@ -51,7 +54,9 @@
         formats: this.options.formats,
         messages: this.options.messages,
         onResult: async (text, metadata) => {
+          if (!this.isOpen || (this.options.mode === "single" && this.resultLocked)) return;
           if (this.options.mode === "single") {
+            this.resultLocked = true;
             this.hideOnly();
           }
           if (this.options.onResult) {
@@ -151,9 +156,11 @@
     }
 
     async open() {
-      if (this.isOpen) {
-        return;
-      }
+      if (this.isOpen) return;
+      const session = ++this.modalSession;
+      if (this.closingPromise) await this.closingPromise;
+      if (this.isOpen || session !== this.modalSession) return;
+      this.resultLocked = false;
       this.isOpen = true;
       this.root.hidden = false;
       this.previousBodyOverflow = document.body.style.overflow;
@@ -168,8 +175,16 @@
     }
 
     async close() {
-      await this.scanner.stop({ emitStatus: false });
+      ++this.modalSession;
+      if (this.closingPromise) return this.closingPromise;
       this.hideOnly();
+      const task = this.scanner.stop({ emitStatus: false });
+      this.closingPromise = task;
+      try {
+        await task;
+      } finally {
+        if (this.closingPromise === task) this.closingPromise = null;
+      }
     }
 
     hideOnly() {
@@ -180,6 +195,8 @@
     }
 
     async destroy() {
+      ++this.modalSession;
+      this.hideOnly();
       await this.scanner.destroy();
       document.removeEventListener("keydown", this.boundKeydown);
       this.root.remove();
@@ -207,11 +224,15 @@
         return;
       }
 
+      const session = this.modalSession;
       this.imageBusy = true;
       this.setStatus("Đang đọc QR từ ảnh...", "info");
 
       try {
         const text = String(await this.imageDecoder.decodeFile(file)).trim();
+        if (!this.isOpen || session !== this.modalSession
+          || (this.options.mode === "single" && this.resultLocked)) return;
+        if (this.options.mode === "single") this.resultLocked = true;
         const metadata = {
           source: "image",
           scannedAt: new Date().toISOString(),
@@ -221,6 +242,7 @@
 
         if (this.options.mode === "single") {
           await this.scanner.stop({ emitStatus: false });
+          if (!this.isOpen || session !== this.modalSession) return;
           this.hideOnly();
         }
 
@@ -231,9 +253,9 @@
           detail: { text, metadata },
         }));
       } catch (error) {
-        this.setStatus(error.message || String(error), "error");
-        if (this.options.onError) {
-          this.options.onError(error);
+        if (this.isOpen && session === this.modalSession) {
+          this.setStatus(error.message || String(error), "error");
+          if (this.options.onError) this.options.onError(error);
         }
       } finally {
         this.imageInput.value = "";

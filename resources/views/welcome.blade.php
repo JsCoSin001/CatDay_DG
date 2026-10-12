@@ -113,7 +113,7 @@
 
         <section class="app-card qr-card" aria-label="Quét QR">
             <div class="qr-action-grid">
-                <button id="open-qr" type="button" class="btn btn-primary app-primary-button qr-open-button">
+                <button id="open-qr" type="button" disabled aria-disabled="true" class="btn btn-primary app-primary-button qr-open-button">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
                         <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
@@ -124,10 +124,11 @@
                 </button>
 
                 <div class="form-check app-check qr-continuous-check">
-                    <input id="continuous-scan" class="form-check-input" type="checkbox">
+                    <input id="continuous-scan" class="form-check-input" type="checkbox" disabled>
                     <label class="form-check-label" for="continuous-scan">Quét liên tiếp</label>
                 </div>
             </div>
+            <p id="b3-qr-guidance" class="b3-qr-guidance" role="status">Vui lòng chọn kế hoạch có công việc cần thực hiện.</p>
         </section>
 
         <section class="app-card result-card" aria-labelledby="result-title">

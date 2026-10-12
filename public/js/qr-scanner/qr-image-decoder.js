@@ -76,6 +76,28 @@
       return this.tryDecodeCandidates(imageData);
     }
 
+    // Lightweight, bounded fallback for live video. No regions, scaling or
+    // native BarcodeDetector: those belong to the existing file-only path.
+    decodeCameraFrame(imageData) {
+      if (!imageData || !imageData.data || typeof global.jsQR !== "function") return null;
+      const candidateBuilders = [
+        () => imageData,
+        () => this.createGrayscaleBoostVariant(imageData),
+        () => this.createHighContrastVariant(imageData),
+        () => this.createThresholdVariant(imageData, 140),
+      ];
+      for (const build of candidateBuilders) {
+        const candidate = build();
+        const found = global.jsQR(candidate.data, candidate.width, candidate.height, {
+          inversionAttempts: "dontInvert",
+        });
+        if (found && typeof found.data === "string" && found.data.trim()) {
+          return found.data.trim();
+        }
+      }
+      return null;
+    }
+
     async readImageData(file) {
       const image = await this.loadImage(file);
       const canvas = document.createElement("canvas");

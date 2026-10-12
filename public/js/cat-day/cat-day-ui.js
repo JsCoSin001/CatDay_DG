@@ -3,7 +3,8 @@
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
 const state=window.B3State; const api=window.B3Api; const PAGE_SIZE=10;
 let planRequestVersion=0, worklistRequestVersion=0, planSearchTimer=null, highlightedPlanIndex=-1;
-let planLoadingTimer=null, pageLoadingId=0, saveInProgress=false;
+let planLoadingTimer=null, pageLoadingId=0, saveInProgress=false, scanOpening=false, autoScanTimer=null;
+let sheetScrollLock=null;
 const pageLoadingTasks=new Map();
 function updatePageLoading(){
     const host=$('#b3-page-loading');if(!host)return;
@@ -143,17 +144,17 @@ function alertUser(type,msg){
     }
 }
 
-function showLogin(){popupClearAll();state.user=null;$('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');}
-function showApp(user){popupClearAll();state.user=user;$('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');$('#desktop-account-name').textContent=user.name||user.username;}
+function showLogin(){cancelAutoScan();popupClearAll();state.user=null;updateQrControls();$('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');}
+function showApp(user){popupClearAll();state.user=user;updateQrControls();$('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');$('#desktop-account-name').textContent=user.name||user.username;}
 function bindLogin(){const f=$('#login-form');if(!f)return;f.addEventListener('submit',async e=>{e.preventDefault();await withPageLoading('Đang đăng nhập...',async()=>{try{const r=await api.login($('#login-username').value.trim(),$('#login-password').value);showApp(r.user);resetPlanScope();}catch(err){alertUser('danger',err.message);}},'auth');});}
 function resetPlanScope(){
     clearTimeout(planSearchTimer);planRequestVersion++;worklistRequestVersion++;
-    state.plans=[];state.selectedPlan=null;state.showAll=false;state.worklist=[];state.page=1;
+    cancelAutoScan();state.plans=[];state.selectedPlan=null;state.showAll=false;state.worklist=[];state.page=1;state.worklistReady=false;state.worklistLoading=false;state.planInputDirty=false;updateQrControls();
     const input=$('#plan-search');if(input)input.value='';closePlanOptions();renderTable();
 }
 function bindAccount(){$$('[data-action="logout"]').forEach(b=>b.addEventListener('click',async()=>withPageLoading('Đang đăng xuất...',async()=>{try{await api.logout();}finally{resetPlanScope();showLogin();}},'auth')));}
 function closePlanOptions(){hidePlanLoading();const host=$('#plan-options');if(host)host.hidden=true;const input=$('#plan-search');if(input){input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');}highlightedPlanIndex=-1;}
-function restorePlanInput(){const input=$('#plan-search');if(input)input.value=state.showAll?'':(state.selectedPlan?.ma_ke_hoach||'');closePlanOptions();}
+function restorePlanInput(){const input=$('#plan-search');if(input)input.value=state.showAll?'':(state.selectedPlan?.ma_ke_hoach||'');state.planInputDirty=false;updateQrControls();closePlanOptions();}
 async function refreshPlans(q,selectExact=false){
     const term=q.trim(),version=++planRequestVersion;
     if(!term){state.plans=[];closePlanOptions();return;}
@@ -172,7 +173,9 @@ function bindPlanSearch(){
     input.addEventListener('focus',()=>input.select());
     input.addEventListener('click',()=>input.select());
     input.addEventListener('input',()=>{
-        clearTimeout(planSearchTimer);planRequestVersion++;closePlanOptions();
+        clearTimeout(planSearchTimer);planRequestVersion++;closePlanOptions();cancelAutoScan();
+        const expected=state.showAll?'':(state.selectedPlan?.ma_ke_hoach||'');
+        state.planInputDirty=input.value.trim().toLowerCase()!==expected.toLowerCase();updateQrControls();
         const value=input.value.trim();if(!value){state.plans=[];return;}
         planSearchTimer=setTimeout(()=>refreshPlans(input.value),300);
     });
@@ -220,10 +223,11 @@ async function selectPlan(plan){
     await changePlanScope(plan,false);
 }
 async function changePlanScope(plan,all){
+    cancelAutoScan();state.worklistLoading=true;state.worklistReady=false;updateQrControls();
     return withPageLoading('Đang tải danh sách kế hoạch...',async()=>{
     const previous={selectedPlan:state.selectedPlan,showAll:state.showAll,worklist:state.worklist,page:state.page};
     const version=++worklistRequestVersion;
-    const input=$('#plan-search');
+    const input=$('#plan-search'),inputAtStart=input?.value;
     try{
         const r=all?await api.allWorklist():await api.worklist(plan.id);
         if(version!==worklistRequestVersion)return;
@@ -234,37 +238,83 @@ async function changePlanScope(plan,all){
             return;
         }
         if(state.showAll!==all||(!all&&String(state.selectedPlan?.id??'')!==String(plan?.id??'')))popupClearAll();
-        state.selectedPlan=plan;state.showAll=all;state.worklist=r.rows||[];state.page=1;
-        if(input)input.value=all?'':plan.ma_ke_hoach;
+        state.selectedPlan=plan;state.showAll=all;state.worklist=r.rows||[];state.page=1;state.worklistReady=true;
+        // Do not overwrite a new search term typed while this request was pending.
+        const editedWhileLoading=!!input&&input.value!==inputAtStart;
+        if(input&&!editedWhileLoading)input.value=all?'':plan.ma_ke_hoach;
+        const expected=all?'':plan.ma_ke_hoach;
+        state.planInputDirty=!!input&&input.value.trim().toLowerCase()!==expected.toLowerCase();
         renderTable();
     }catch(e){
         if(version!==worklistRequestVersion)return;
         state.selectedPlan=previous.selectedPlan;state.showAll=previous.showAll;
         state.worklist=previous.worklist;state.page=previous.page;
         restorePlanInput();renderTable();alertUser('danger',e.message);
-    }
+    }finally{if(version===worklistRequestVersion){state.worklistLoading=false;updateQrControls();}}
     },'worklist');
 }
 async function loadWorklist(){
+    state.worklistLoading=true;state.worklistReady=false;updateQrControls();
     return withPageLoading('Đang tải danh sách kế hoạch...',async()=>{
     const version=++worklistRequestVersion;
     try{let r;if(state.showAll)r=await api.allWorklist();else if(state.selectedPlan)r=await api.worklist(state.selectedPlan.id);else{state.worklist=[];renderTable();return;}
         if(version!==worklistRequestVersion)return;
-        state.worklist=r.rows||[];renderTable();
+        state.worklist=r.rows||[];state.worklistReady=true;renderTable();
     }catch(e){if(version===worklistRequestVersion)alertUser('danger',e.message);}
+    finally{if(version===worklistRequestVersion){state.worklistLoading=false;updateQrControls();}}
     },'worklist');
 }
 function renderTable(){const body=$('#plan-table-body'),empty=$('#empty-state'),pag=$('#pagination');if(!body)return;const total=state.worklist.length,pages=Math.max(1,Math.ceil(total/PAGE_SIZE));state.page=Math.min(state.page,pages);const rows=state.worklist.slice((state.page-1)*PAGE_SIZE,state.page*PAGE_SIZE);body.innerHTML=rows.map(r=>`<tr><td>${esc(r.ma_ke_hoach)}</td><td>${esc(r.ten_san_pham)}</td><td class="text-end">${esc(fmt(r.so_luong_cuon))}</td><td class="text-end">${esc(fmt(r.so_cuon_cat_le))}</td><td class="text-end">${esc(fmt(r.so_dau))}</td><td class="text-end">${esc(fmt(r.so_cuoi))}</td><td>${esc(fmt(r.lot))}</td><td>${esc(r.tinh_trang)}</td></tr>`).join('');if(empty){empty.hidden=total>0;empty.querySelector('span').textContent='Chọn mã kế hoạch hoặc nhấn Tìm toàn bộ kế hoạch để xem công việc còn lại.';}if(pag)pag.hidden=total<=PAGE_SIZE;$('#result-summary').textContent=state.showAll?(total?`Đang xem toàn bộ kế hoạch · ${total} dòng công việc`:'Đang xem toàn bộ kế hoạch · Chưa có dữ liệu.'):(total?`${total} dòng công việc`:'Chưa có dữ liệu kế hoạch.');renderPagination(pages);}
 function bindPagination(){$('#mobile-prev')?.addEventListener('click',()=>go(state.page-1));$('#mobile-next')?.addEventListener('click',()=>go(state.page+1));}
 function renderPagination(pages){const h=$('#desktop-pagination');if(h){h.innerHTML='';for(let i=1;i<=pages;i++){const b=document.createElement('button');b.className='page-number'+(i===state.page?' active':'');b.textContent=i;b.onclick=()=>go(i);h.appendChild(b);}}const l=$('#mobile-page-label');if(l)l.textContent=`Trang ${state.page}/${pages}`;}
 function go(p){const pages=Math.max(1,Math.ceil(state.worklist.length/PAGE_SIZE));state.page=Math.min(Math.max(1,p),pages);renderTable();}
-function bindQr(){$('#open-qr')?.addEventListener('click',openScanner);}
-async function openScanner(){if(!state.hasPlanScope()){alertUser('danger','Vui lòng chọn mã kế hoạch hoặc nhấn “Tìm toàn bộ kế hoạch” trước khi quét QR.');return;}if(typeof window.QrCameraModal!=='function'){alertUser('danger','Module QR chưa sẵn sàng.');return;}if(!state.singleQrModal){state.singleQrModal=new window.QrCameraModal({title:'Quét QR',subtitle:'Đưa mã QR vào khung camera',mode:'single',duplicateDelay:1500,optimizeCamera:true,allowImage:false,formats:['QR_CODE'],onResult:resolveScan,onError:e=>alertUser('danger',e?.message||'Quét QR thất bại.')});}await state.singleQrModal.open();}
+function cancelAutoScan(){if(autoScanTimer!==null){clearTimeout(autoScanTimer);autoScanTimer=null;}}
+function updateQrControls(){
+    const allowed=typeof state.canScan==='function'&&state.canScan();
+    const button=$('#open-qr'),checkbox=$('#continuous-scan'),guidance=$('#b3-qr-guidance');
+    if(button){button.disabled=!allowed;button.setAttribute('aria-disabled',String(!allowed));}
+    if(checkbox)checkbox.disabled=!allowed;
+    if(guidance)guidance.hidden=!!allowed;
+}
+function bindQr(){$('#open-qr')?.addEventListener('click',openScanner);updateQrControls();}
+async function openScanner(){
+    if(!state.canScan()||scanOpening||state.singleQrModal?.isOpen)return;
+    if(typeof window.QrCameraModal!=='function'){alertUser('danger','Module QR chưa sẵn sàng.');return;}
+    scanOpening=true;
+    try{
+        if(!state.singleQrModal){state.singleQrModal=new window.QrCameraModal({title:'Quét QR',subtitle:'Đưa mã QR vào khung camera',mode:'single',duplicateDelay:1500,optimizeCamera:true,allowImage:false,formats:['QR_CODE'],onResult:resolveScan,onError:e=>alertUser('danger',e?.message||'Quét QR thất bại.')});}
+        if(state.canScan())await state.singleQrModal.open();
+    }finally{scanOpening=false;}
+}
 async function resolveScan(raw){return withPageLoading('Đang đọc dữ liệu QR...',async()=>{try{const r=await api.resolveQr(String(raw||'').trim(),state.showAll?null:state.selectedPlan?.id||null);state.scan=r;chooseContext(r.selected_context||null);showSheet(raw);}catch(e){alertUser('danger',e.message);}},'qr');}
 function chooseContext(ctx){state.context=ctx;state.action=null;state.groupId=null;state.detailId=null;state.endValue='';state.direction=1;state.firstCutConfirmed=false;if(!ctx)return;const actions=ctx.available_actions||[];state.action=actions.length===1?actions[0]:null;state.groupId=ctx.groups?.length===1?ctx.groups[0].id:null;const g=currentGroup();state.detailId=g?.details?.find(d=>!Number(d.done)&&d.selectable!==false)?.id||null;}
 function bindSheet(){$('#close-bottom-sheet-x')?.addEventListener('click',closeSheet);$('#b3-cancel-action')?.addEventListener('click',closeSheet);$('#qr-bottom-sheet-backdrop')?.addEventListener('click',closeSheet);$$('[data-b3-tab]').forEach(b=>b.addEventListener('click',()=>{state.action=b.dataset.b3Tab==='whole'?'TAKE_WHOLE_REEL':(state.scan?.source?.source_type==='CUON_LE'?'CUT_PARTIAL_REEL':'CUT_FULL_REEL');if(state.action==='CUT_FULL_REEL')state.firstCutConfirmed=false;renderSheet();}));$('#b3-save-action')?.addEventListener('click',saveAction);}
-function showSheet(raw){$('#qr-result-value').textContent=raw;$('#b3-continue-scan').checked=!!$('#continuous-scan')?.checked;$('#qr-bottom-sheet').hidden=false;$('#qr-bottom-sheet-backdrop').hidden=false;renderSheet();}
-function closeSheet(){$('#qr-bottom-sheet').hidden=true;$('#qr-bottom-sheet-backdrop').hidden=true;}
+function lockSheetBackground(){
+    if(sheetScrollLock)return;
+    const body=document.body,style=body.style;
+    sheetScrollLock={x:window.scrollX||0,y:window.scrollY||0,styles:{}};
+    for(const key of ['position','top','left','right','width','overflow'])sheetScrollLock.styles[key]=style[key];
+    style.position='fixed';style.top=`-${sheetScrollLock.y}px`;style.left='0';style.right='0';style.width='100%';style.overflow='hidden';
+}
+function unlockSheetBackground(){
+    if(!sheetScrollLock)return;
+    const lock=sheetScrollLock;sheetScrollLock=null;
+    for(const [key,value] of Object.entries(lock.styles))document.body.style[key]=value;
+    window.scrollTo(lock.x,lock.y);
+}
+function closeDecisionOverlay(){
+    $('#b3-first-cut-decision-overlay')?.remove();
+    const sheet=$('#qr-bottom-sheet');sheet?.classList.remove('b3-decision-active');if(sheet)sheet.inert=false;
+}
+function showSheet(raw){
+    $('#qr-result-value').textContent=raw;$('#b3-continue-scan').checked=!!$('#continuous-scan')?.checked;
+    lockSheetBackground();const app=$('#app-screen');if(app)app.inert=true;$('#qr-bottom-sheet').hidden=false;$('#qr-bottom-sheet-backdrop').hidden=false;
+    renderSheet();
+}
+function closeSheet(){
+    closeDecisionOverlay();$('#qr-bottom-sheet').hidden=true;$('#qr-bottom-sheet-backdrop').hidden=true;
+    unlockSheetBackground();const app=$('#app-screen');if(app)app.inert=false;
+}
 function currentGroup(){return state.context?.groups?.find(g=>String(g.id)===String(state.groupId))||null;}
 function renderSheet(){
     const src=state.scan?.source;if(!src)return;
@@ -284,8 +334,8 @@ function renderSheet(){
 function renderWhole(host,ctx){const left=Math.max(0,ctx.item.whole_required-ctx.item.whole_done);host.innerHTML=`<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">LẤY NGUYÊN CUỘN</span><h3>${esc(ctx.item.product_name)}</h3></div><div class="b3-value-list"><div><span>Kế hoạch</span><strong>${ctx.item.whole_required} cuộn</strong></div><div><span>Đã lấy</span><strong>${ctx.item.whole_done} cuộn</strong></div><div><span>Còn lại</span><strong>${left} cuộn</strong></div><div><span>Lần này</span><strong>1 cuộn</strong></div></div></section>`;}
 function renderCut(host,ctx,src){if(src.source_type==='CUON_CHAN'&&!state.firstCutConfirmed){host.innerHTML='<section class="b3-operation-panel b3-first-cut-waiting" aria-hidden="true"></section>';showFirstCutDecisionOverlay();return;}const groups=ctx.groups||[];if(groups.length>1&&!state.groupId){host.innerHTML=`<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">CẮT LẺ</span><h3>${esc(ctx.item.product_name)}</h3></div><label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control"><option value="">Chọn nhóm...</option>${groups.map(x=>`<option value="${x.id}">${x.details.filter(y=>!Number(y.done)).map(y=>y.ChieuDaiCanCat).join(';')}</option>`).join('')}</select></label><p class="b3-inline-note">Có nhiều nhóm phù hợp. Vui lòng chọn nhóm trước khi chọn chiều dài cần cắt.</p></section>`;$('#b3-group-select').onchange=e=>{if(!e.target.value)return;state.groupId=Number(e.target.value);state.detailId=null;renderSheet();};$('#b3-save-action').disabled=true;return;}const g=currentGroup();if(!g){host.innerHTML='<div class="b3-complete-state">Không còn nhóm cắt phù hợp.</div>';$('#b3-save-action').disabled=true;return;}$('#b3-save-action').disabled=false;if(!state.detailId||!g.details.some(d=>String(d.id)===String(state.detailId)&&!Number(d.done)&&d.selectable!==false))state.detailId=g.details.find(d=>!Number(d.done)&&d.selectable!==false)?.id||null;const d=g.details.find(x=>String(x.id)===String(state.detailId));const groupSelect=groups.length>1?`<label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control">${groups.map(x=>`<option value="${x.id}" ${String(x.id)===String(state.groupId)?'selected':''}>${x.details.filter(y=>!Number(y.done)).map(y=>y.ChieuDaiCanCat).join(';')}</option>`).join('')}</select></label>`:'';const detailSelect=`<label class="b3-input-block"><span>Chiều dài cần cắt</span><select id="b3-cut-detail-select" class="form-select app-control">${g.details.map(x=>`<option value="${x.id}" ${String(x.id)===String(state.detailId)?'selected':''} ${Number(x.done)||x.selectable===false?'disabled':''}>${x.ChieuDaiCanCat} m${Number(x.done)?' · Đã thực hiện':x.selectable===false?' · Không đủ chiều dài':''}</option>`).join('')}</select></label>`;let input='';if(src.source_type==='CUON_CHAN'){input=`<label class="b3-input-block"><span>Số cuối</span><input id="b3-end-value-input" type="number" class="form-control app-control" value="${esc(state.endValue)}"></label><label class="b3-input-block"><span>Chiều</span><select id="b3-direction-select" class="form-select app-control"><option value="1" ${state.direction===1?'selected':''}>Chiều thuận</option><option value="-1" ${state.direction===-1?'selected':''}>Chiều nghịch</option></select></label>`;}else{input=`<div class="b3-value-list compact"><div><span>Số đầu</span><strong>${src.partial.SoDau}</strong></div><div><span>Số cuối</span><strong>${src.partial.SoCuoi}</strong></div></div>`;}const preview=d?previewHtml(src,d):'';host.innerHTML=`<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">CẮT LẺ</span><h3>${esc(ctx.item.product_name)}</h3></div><div class="b3-cut-layout"><div class="b3-cut-main">${groupSelect}${detailSelect}${input}${preview}</div><aside class="b3-cut-side"><section class="b3-detail-list"><h4>Các đoạn trong nhóm</h4><ul>${g.details.map(x=>`<li class="b3-detail-row ${Number(x.done)?'is-done':String(x.id)===String(state.detailId)?'is-selected':''}"><span>${Number(x.done)?'✓':'•'}</span><span>${x.ChieuDaiCanCat} m</span><small>${Number(x.done)?'Đã thực hiện':x.selectable===false?'Không đủ chiều dài':'Chưa thực hiện'}</small></li>`).join('')}</ul></section></aside></div></section>`;$('#b3-group-select')?.addEventListener('change',e=>{state.groupId=Number(e.target.value);state.detailId=null;renderSheet();});$('#b3-cut-detail-select')?.addEventListener('change',e=>{state.detailId=Number(e.target.value);renderSheet();});$('#b3-end-value-input')?.addEventListener('input',e=>{state.endValue=e.target.value;renderSheet();});$('#b3-direction-select')?.addEventListener('change',e=>{state.direction=Number(e.target.value);renderSheet();});}
 
-function showFirstCutDecisionOverlay(){if($('#b3-first-cut-decision-overlay'))return;const overlay=document.createElement('div');overlay.id='b3-first-cut-decision-overlay';overlay.className='b3-decision-overlay';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.innerHTML=`<section class="b3-decision-card" data-b3-ui-purpose="confirm-first-cut-from-whole-reel"><div class="b3-decision-kicker">CẮT LẺ · CUỘN CHẴN</div><h2 id="b3-first-cut-decision-title">Cuộn vừa quét là cuộn chẵn</h2><p class="b3-decision-question">Bạn có muốn sử dụng cuộn này để bắt đầu cắt lẻ không?</p><p class="b3-decision-help">Nếu chọn “Không, quét lại”, màn hình sẽ quay trở lại quét QR.</p><div class="b3-decision-actions"><button id="b3-first-cut-no" type="button" class="btn b3-first-cut-cancel">Không, quét lại</button><button id="b3-first-cut-yes" type="button" class="btn b3-first-cut-continue">Tiếp tục cắt lẻ</button></div></section>`;document.body.appendChild(overlay);$('#b3-first-cut-no').onclick=async()=>{overlay.remove();closeSheet();await openScanner();};$('#b3-first-cut-yes').onclick=()=>{state.firstCutConfirmed=true;overlay.remove();renderSheet();};}
+function showFirstCutDecisionOverlay(){if($('#b3-first-cut-decision-overlay'))return;const overlay=document.createElement('div');overlay.id='b3-first-cut-decision-overlay';overlay.className='b3-decision-overlay';overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.innerHTML=`<section class="b3-decision-card" data-b3-ui-purpose="confirm-first-cut-from-whole-reel"><div class="b3-decision-kicker">CẮT LẺ · CUỘN CHẴN</div><h2 id="b3-first-cut-decision-title">Cuộn vừa quét là cuộn chẵn</h2><p class="b3-decision-question">Bạn có muốn sử dụng cuộn này để bắt đầu cắt lẻ không?</p><p class="b3-decision-help">Nếu chọn “Không, quét lại”, màn hình sẽ quay trở lại quét QR.</p><div class="b3-decision-actions"><button id="b3-first-cut-no" type="button" class="btn b3-first-cut-cancel">Không, quét lại</button><button id="b3-first-cut-yes" type="button" class="btn b3-first-cut-continue">Tiếp tục cắt lẻ</button></div></section>`;document.body.appendChild(overlay);const sheet=$('#qr-bottom-sheet');sheet?.classList.add('b3-decision-active');if(sheet)sheet.inert=true;$('#b3-first-cut-no').onclick=async()=>{closeSheet();await openScanner();};$('#b3-first-cut-yes').onclick=()=>{state.firstCutConfirmed=true;closeDecisionOverlay();renderSheet();};}
 
 function previewHtml(src,d){if(src.source_type!=='CUON_CHAN'||state.endValue==='')return'';const v=Number(state.endValue)-state.direction*Number(d.ChieuDaiCanCat);return `<div id="b3-after-cut-card" class="b3-after-cut-card ${v<0?'is-error':''}" aria-live="polite"><span class="b3-after-cut-label">SỐ ĐẦU SAU CẮT</span><strong id="b3-after-cut-value">${v<0?'LỖI':v}</strong><small id="b3-after-cut-note">${v<0?'Kiểm tra lại số cuối · Số đầu sau cắt phải lớn hơn hoặc bằng 0.':'Giá trị xem trước trên UI · logic thật sẽ do server tính/kiểm tra lại.'}</small></div>`;}
-async function saveAction(){const ctx=state.context;if(!ctx||saveInProgress)return;saveInProgress=true;const saveButton=$('#b3-save-action');if(saveButton)saveButton.disabled=true;try{return await withPageLoading('Đang lưu dữ liệu...',async()=>{try{let r;if(state.action==='TAKE_WHOLE_REEL'){r=await api.takeWhole({raw_qr:state.scan.source.raw_qr,ke_hoach_id:ctx.plan.id,ke_hoach_hang_id:ctx.item.id,operation_token:state.scan.operation_token});}else{if(!state.groupId||!state.detailId)throw new Error('Vui lòng chọn nhóm và chiều dài cần cắt.');const p={raw_qr:state.scan.source.raw_qr,ke_hoach_id:ctx.plan.id,ke_hoach_hang_id:ctx.item.id,group_id:state.groupId,detail_id:state.detailId,operation_token:state.scan.operation_token};if(state.scan.source.source_type==='CUON_CHAN'){if(state.endValue==='')throw new Error('Vui lòng nhập số cuối.');const det=currentGroup()?.details?.find(x=>String(x.id)===String(state.detailId));const pv=Number(state.endValue)-state.direction*Number(det?.ChieuDaiCanCat||0);if(pv<0)throw new Error('Lỗi - kiểm tra lại số cuối. Số đầu sau cắt phải lớn hơn hoặc bằng 0.');p.end_value=Number(state.endValue);p.direction=state.direction;}r=await api.cut(p);}alertUser('success','Lưu thành công.');closeSheet();if(r?.plan_complete){state.plans=state.plans.filter(x=>String(x.id)!==String(r.plan_id));if(state.selectedPlan&&String(state.selectedPlan.id)===String(r.plan_id)){state.selectedPlan=null;const input=$('#plan-search');if(input)input.value='';}if(state.showAll)await loadWorklist();else{state.worklist=[];renderTable();}}else{await loadWorklist();}if($('#b3-continue-scan')?.checked||$('#continuous-scan')?.checked)setTimeout(openScanner,200);}catch(e){alertUser('danger',e.message);if(e.code==='STALE_DATA'||e.code==='DETAIL_ALREADY_DONE'||e.code==='DUPLICATE_REQUEST'){closeSheet();await loadWorklist();}}},'save');}finally{saveInProgress=false;if(saveButton&&!$('#qr-bottom-sheet')?.hidden)saveButton.disabled=false;}}
+async function saveAction(){const ctx=state.context;if(!ctx||saveInProgress)return;saveInProgress=true;const saveButton=$('#b3-save-action');if(saveButton)saveButton.disabled=true;try{return await withPageLoading('Đang lưu dữ liệu...',async()=>{try{let r;if(state.action==='TAKE_WHOLE_REEL'){r=await api.takeWhole({raw_qr:state.scan.source.raw_qr,ke_hoach_id:ctx.plan.id,ke_hoach_hang_id:ctx.item.id,operation_token:state.scan.operation_token});}else{if(!state.groupId||!state.detailId)throw new Error('Vui lòng chọn nhóm và chiều dài cần cắt.');const p={raw_qr:state.scan.source.raw_qr,ke_hoach_id:ctx.plan.id,ke_hoach_hang_id:ctx.item.id,group_id:state.groupId,detail_id:state.detailId,operation_token:state.scan.operation_token};if(state.scan.source.source_type==='CUON_CHAN'){if(state.endValue==='')throw new Error('Vui lòng nhập số cuối.');const det=currentGroup()?.details?.find(x=>String(x.id)===String(state.detailId));const pv=Number(state.endValue)-state.direction*Number(det?.ChieuDaiCanCat||0);if(pv<0)throw new Error('Lỗi - kiểm tra lại số cuối. Số đầu sau cắt phải lớn hơn hoặc bằng 0.');p.end_value=Number(state.endValue);p.direction=state.direction;}r=await api.cut(p);}alertUser('success','Lưu thành công.');closeSheet();if(r?.plan_complete){state.plans=state.plans.filter(x=>String(x.id)!==String(r.plan_id));if(state.selectedPlan&&String(state.selectedPlan.id)===String(r.plan_id)){state.selectedPlan=null;const input=$('#plan-search');if(input)input.value='';}if(state.showAll)await loadWorklist();else{state.worklist=[];state.worklistReady=false;updateQrControls();renderTable();}}else{await loadWorklist();}if($('#b3-continue-scan')?.checked&&state.canScan()){cancelAutoScan();autoScanTimer=setTimeout(()=>{autoScanTimer=null;if(state.canScan())void openScanner();},200);}}catch(e){alertUser('danger',e.message);if(e.code==='STALE_DATA'||e.code==='DETAIL_ALREADY_DONE'||e.code==='DUPLICATE_REQUEST'){closeSheet();await loadWorklist();}}},'save');}finally{saveInProgress=false;if(saveButton&&!$('#qr-bottom-sheet')?.hidden)saveButton.disabled=false;}}
 })();

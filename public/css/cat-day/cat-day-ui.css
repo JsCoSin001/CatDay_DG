@@ -346,7 +346,7 @@ button { touch-action: manipulation; }
     bottom: max(10px, env(safe-area-inset-bottom));
     width: auto;
     max-height: calc(100dvh - 20px - env(safe-area-inset-top));
-    overflow: auto;
+    overflow: hidden;
     border-radius: 14px;
     background: #fff;
     box-shadow: 0 -22px 50px rgba(18, 39, 64, .22);
@@ -515,7 +515,7 @@ button { touch-action: manipulation; }
    -------------------------------------------------------------------------- */
 .b3-result-sheet { overflow: hidden; }
 .b3-result-shell {
-    max-height: calc(100dvh - 20px - env(safe-area-inset-top));
+    max-height: calc(100dvh - 44px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
 }
@@ -561,6 +561,9 @@ button { touch-action: manipulation; }
     min-height: 0;
     flex: 1 1 auto;
     overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     padding: 14px 18px 18px;
 }
 .b3-context-card {
@@ -1049,3 +1052,22 @@ button { touch-action: manipulation; }
 .b3-plan-loading .b3-loading-spinner { width: 17px; height: 17px; border-width: 2px; }
 @keyframes b3-loading-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .b3-loading-spinner { animation-duration: 1.5s; } }
+
+/* B3: only the sheet content scrolls; nested decision locks the lower layer. */
+.b3-result-sheet.b3-decision-active { pointer-events: none; }
+.b3-result-sheet.b3-decision-active .b3-result-scroll {
+    overflow: hidden;
+    touch-action: none;
+}
+.qr-open-button:disabled {
+    background: #aeb9c7 !important;
+    border-color: #aeb9c7 !important;
+    color: #fff;
+    opacity: 1;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+.qr-continuous-check input:disabled + .form-check-label { color: #8994a3; }
+.qr-continuous-check input:disabled { opacity: .65; }
+.b3-qr-guidance { margin: 8px 0 0; color: #68778e; font-size: .83rem; }
+.b3-qr-guidance[hidden] { display: none !important; }

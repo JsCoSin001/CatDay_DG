@@ -63,12 +63,17 @@
 .qr-lib-status[data-level="error"] { background: #fff1f2; color: #be123c; }
 .qr-lib-status[hidden] { display: none !important; }
 .qr-lib-region {
-  flex: 1 1 auto;
-  min-height: min(62vh, 620px);
+  flex: 0 0 auto;
+  width: min(100%, 70dvh, 680px);
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  margin: 0 auto;
+  position: relative;
   overflow: hidden;
   border-radius: 10px;
   background: #020617;
 }
+/* Preserve the video/overlay mapping calculated by html5-qrcode. */
 .qr-lib-region video { width: 100% !important; height: auto !important; }
 .qr-lib-actions { flex: 0 0 auto; display: flex; gap: 10px; margin-top: 12px; }
 .qr-lib-button {
@@ -98,7 +103,7 @@
   .qr-lib-body {
     padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
-  .qr-lib-region { min-height: 54vh; border-radius: 8px; }
+  .qr-lib-region { border-radius: 8px; }
   .qr-lib-actions { gap: 8px; }
   .qr-lib-button { min-height: 48px; }
 }

@@ -15,6 +15,14 @@
     targetMissing: "Không tìm thấy vùng hiển thị camera.",
   });
 
+  // A denied browser permission is not a camera-device failure; do not retry and prompt repeatedly.
+  function cameraPermissionDenied(error) {
+    const name = String(error?.name || "");
+    const message = String(error?.message || error || "");
+    return /^(NotAllowedError|PermissionDeniedError|PermissionDismissedError|SecurityError)$/i.test(name)
+      || /permission denied|permission dismissed|notallowederror|permissiondeniederror|quyền.*(từ chối|bị chặn)|not permitted|access denied/i.test(message);
+  }
+
   class QrCameraScanner {
     constructor(options) {
       const opts = options || {};
@@ -32,10 +40,15 @@
         fps: Number.isFinite(Number(opts.fps)) ? Math.max(1, Number(opts.fps)) : 14,
         qrboxRatio: Number.isFinite(Number(opts.qrboxRatio))
           ? Math.min(1, Math.max(0.2, Number(opts.qrboxRatio)))
-          : 0.82,
+          : 0.90,
         aspectRatio: Number.isFinite(Number(opts.aspectRatio))
           ? Number(opts.aspectRatio)
           : 1,
+        adaptiveScan: opts.adaptiveScan !== false,
+        adaptiveDelay: Number.isFinite(Number(opts.adaptiveDelay))
+          ? Math.max(0, Number(opts.adaptiveDelay)) : 2000,
+        adaptiveInterval: Number.isFinite(Number(opts.adaptiveInterval))
+          ? Math.max(1000, Number(opts.adaptiveInterval)) : 1000,
         emitEvents: opts.emitEvents !== false,
         eventTarget: opts.eventTarget || (typeof document !== "undefined" ? document : null),
         onResult: typeof opts.onResult === "function" ? opts.onResult : null,
@@ -52,6 +65,15 @@
       this.torchSupported = false;
       this.torchEnabled = false;
       this.lastResults = new Map();
+      this.sessionId = 0;
+      this.pendingStart = null;
+      this.stopPromise = null;
+      this.adaptiveTimer = null;
+      this.adaptiveCanvas = null;
+      this.adaptiveDecoder = null;
+      this.resizeHandler = null;
+      this.resizeTimer = null;
+      this.scanViewportSize = null;
       this.elementId = this.resolveElementId();
     }
 
@@ -93,151 +115,201 @@
       if (this.running || this.starting) {
         return this.getState();
       }
+      // Never rebuild the video element while an older instance is releasing it.
+      if (this.stopPromise) {
+        await this.stopPromise;
+      }
+      if (this.running || this.starting) {
+        return this.getState();
+      }
 
       if (typeof global.Html5Qrcode !== "function") {
         const error = this.createError("LIBRARY_MISSING", this.options.messages.libraryMissing);
         this.emitError(error);
         throw error;
       }
-
       if (!this.elementId || (typeof document !== "undefined" && !document.getElementById(this.elementId))) {
         const error = this.createError("TARGET_MISSING", this.options.messages.targetMissing);
         this.emitError(error);
         throw error;
       }
 
+      const session = ++this.sessionId;
       this.starting = true;
+      this.resultBusy = false;
       this.emitState();
       this.emitStatus("preparing", this.options.messages.preparing, "info");
       this.clearTarget();
 
+      const task = this.startCameraSession(session);
+      this.pendingStart = task;
+      try {
+        return await task;
+      } finally {
+        if (this.pendingStart === task) {
+          this.pendingStart = null;
+        }
+      }
+    }
+
+    async startCameraSession(session) {
       const constructorConfig = { verbose: false };
       const formatsToSupport = this.resolveFormats();
       if (formatsToSupport.length) {
         constructorConfig.formatsToSupport = formatsToSupport;
       }
-
-      this.html5QrCode = new global.Html5Qrcode(this.elementId, constructorConfig);
-
-      const onSuccess = async (decodedText, decodedResult) => {
-        await this.handleDecodedResult(decodedText, decodedResult);
-      };
-
-      const scannerConfig = {
-        fps: this.options.fps,
-        qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const edge = Math.floor(
-            Math.min(viewfinderWidth, viewfinderHeight) * this.options.qrboxRatio,
-          );
-          return { width: edge, height: edge };
-        },
-        disableFlip: false,
-        aspectRatio: this.options.aspectRatio,
-      };
-
-      const relaxedScannerConfig = {
-        fps: Math.min(this.options.fps, 12),
-        disableFlip: false,
-      };
-
-      const tryStartScanner = async (cameraConfig, config) => {
-        await this.html5QrCode.start(
-          cameraConfig,
-          config || scannerConfig,
-          onSuccess,
-          function () {},
-        );
-      };
-
+      let instance;
       try {
+        instance = new global.Html5Qrcode(this.elementId, constructorConfig);
+        this.html5QrCode = instance;
+        const qrbox = (width, height) => {
+          // Same actual crop for the primary camera AND every fallback.
+          const side = Math.max(50, Math.floor(
+            Math.min(width, height) * this.options.qrboxRatio,
+          ));
+          return { width: side, height: side };
+        };
+        const primaryConfig = {
+          fps: this.options.fps,
+          qrbox,
+          disableFlip: false,
+          aspectRatio: this.options.aspectRatio,
+        };
+        const relaxedConfig = {
+          fps: Math.min(this.options.fps, 12),
+          qrbox,
+          disableFlip: false,
+        };
+        const onSuccess = (text, result) => {
+          void this.handleDecodedResult(text, result, session);
+        };
+        const tryStart = async (camera, config) => {
+          if (this.sessionId !== session) {
+            throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
+          }
+          await instance.start(camera, config, onSuccess, function () {});
+          if (this.sessionId !== session) {
+            throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
+          }
+        };
         try {
-          await tryStartScanner({ facingMode: "environment" });
+          await tryStart({ facingMode: "environment" }, primaryConfig);
         } catch (primaryError) {
+          if (this.sessionId !== session || cameraPermissionDenied(primaryError)) throw primaryError;
           this.emitStatus("fallback", this.options.messages.fallback, "info");
-
           try {
-            await tryStartScanner(
-              { facingMode: { ideal: "environment" } },
-              relaxedScannerConfig,
-            );
+            // html5-qrcode 2.3.8 does not accept { facingMode: { ideal: ... } }.
+            await tryStart({ facingMode: "environment" }, relaxedConfig);
           } catch (_) {
+            if (this.sessionId !== session || cameraPermissionDenied(_)) throw _;
             this.emitStatus("retrying", this.options.messages.retrying, "info");
             const cameras = typeof global.Html5Qrcode.getCameras === "function"
-              ? await global.Html5Qrcode.getCameras()
-              : [];
-
-            const backCamera =
-              cameras.find((camera) => /back|rear|environment|sau/iu.test(camera.label || "")) ||
-              cameras[cameras.length - 1];
-
-            if (!backCamera || !backCamera.id) {
-              throw primaryError;
+              ? await global.Html5Qrcode.getCameras() : [];
+            if (this.sessionId !== session) {
+              throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
             }
-
+            const camera = cameras.find((item) => /back|rear|environment|sau/iu.test(item.label || ""))
+              || cameras[cameras.length - 1];
+            if (!camera || !camera.id) throw primaryError;
             try {
-              await tryStartScanner(
-                { deviceId: { exact: backCamera.id } },
-                relaxedScannerConfig,
-              );
-            } catch (_) {
-              await tryStartScanner(backCamera.id, relaxedScannerConfig);
+              await tryStart({ deviceId: { exact: camera.id } }, relaxedConfig);
+            } catch (byIdError) {
+              if (this.sessionId !== session || cameraPermissionDenied(byIdError)) throw byIdError;
+              await tryStart(camera.id, relaxedConfig);
             }
           }
         }
 
+        if (this.sessionId !== session) {
+          throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
+        }
         this.running = true;
         this.starting = false;
-        await this.optimizeActiveCameraTrack();
+        try {
+          await this.optimizeActiveCameraTrack();
+        } catch (_) {
+          // Failure to query or tune camera capabilities must not prevent scanning.
+          this.torchSupported = false;
+          this.torchEnabled = false;
+        }
+        if (this.sessionId !== session) {
+          throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
+        }
         this.emitState();
         this.emitStatus("ready", this.options.messages.ready, "info");
+        this.alignScanOverlay();
+        this.watchViewportResize(session);
+        this.startAdaptiveScanning(session);
         return this.getState();
       } catch (cause) {
+        await this.releaseInstance(instance);
+        if (this.html5QrCode === instance) this.html5QrCode = null;
+        if (this.sessionId !== session) {
+          // A user closing the modal during startup is not a camera error.
+          throw cause;
+        }
+        this.running = false;
         this.starting = false;
-        await this.stop({ emitStatus: false });
-        const detail = cause && cause.message
-          ? `${this.options.messages.startFailed} (${cause.message})`
-          : this.options.messages.startFailed;
-        const error = this.createError("CAMERA_START_FAILED", detail, cause);
+        this.clearTarget();
+        this.emitState();
+        const denied = cameraPermissionDenied(cause);
+        const detail = denied
+          ? "Không thể truy cập camera do quyền bị từ chối. Vui lòng cho phép sử dụng camera trong cài đặt trang web, sau đó thử lại."
+          : cause && cause.message
+            ? `${this.options.messages.startFailed} (${cause.message})`
+            : this.options.messages.startFailed;
+        const error = this.createError(denied ? "CAMERA_PERMISSION_DENIED" : "CAMERA_START_FAILED", detail, cause);
         this.emitError(error);
         throw error;
+      }
+    }
+
+    async releaseInstance(instance) {
+      if (!instance) return;
+      if (typeof instance.stop === "function") {
+        try { await instance.stop(); } catch (_) { /* Already stopped, or never started. */ }
+      }
+      if (typeof instance.clear === "function") {
+        try { await instance.clear(); } catch (_) { /* Scanner may already be released. */ }
       }
     }
 
     async stop(options) {
       const opts = options || {};
       const emitStatus = opts.emitStatus !== false;
-      const instance = this.html5QrCode;
-      const shouldStop = Boolean(instance && (this.running || this.starting));
-
+      // Invalidate both the scanning callbacks and delayed image processing immediately.
+      ++this.sessionId;
+      this.clearAdaptiveScanning();
+      this.clearViewportResize();
       this.running = false;
       this.starting = false;
       this.torchSupported = false;
       this.torchEnabled = false;
-
-      if (shouldStop && typeof instance.stop === "function") {
-        try {
-          await instance.stop();
-        } catch (_) {
-          // Camera may already have been released by the browser.
-        }
-      }
-
-      if (instance && typeof instance.clear === "function") {
-        try {
-          await instance.clear();
-        } catch (_) {
-          // Clearing a released scanner is safe to ignore.
-        }
-      }
-
-      this.html5QrCode = null;
-      this.clearTarget();
       this.emitState();
+      if (this.stopPromise) {
+        await this.stopPromise;
+        return this.getState();
+      }
 
+      const pending = this.pendingStart;
+      const instance = this.html5QrCode;
+      const task = (async () => {
+        if (pending) {
+          try { await pending; } catch (_) { /* A canceled start is expected. */ }
+        }
+        await this.releaseInstance(instance);
+        if (this.html5QrCode === instance) this.html5QrCode = null;
+        this.clearTarget();
+      })();
+      this.stopPromise = task;
+      try {
+        await task;
+      } finally {
+        if (this.stopPromise === task) this.stopPromise = null;
+      }
       if (emitStatus) {
         this.emitStatus("stopped", this.options.messages.stopped, "info");
       }
-
       return this.getState();
     }
 
@@ -289,12 +361,11 @@
         return;
       }
 
-      const capabilities = typeof this.html5QrCode.getRunningTrackCapabilities === "function"
-        ? this.html5QrCode.getRunningTrackCapabilities()
-        : null;
-      const settings = typeof this.html5QrCode.getRunningTrackSettings === "function"
-        ? this.html5QrCode.getRunningTrackSettings()
-        : null;
+      const instance = this.html5QrCode;
+      const capabilities = typeof instance.getRunningTrackCapabilities === "function"
+        ? instance.getRunningTrackCapabilities() : null;
+      const settings = typeof instance.getRunningTrackSettings === "function"
+        ? instance.getRunningTrackSettings() : null;
 
       this.torchSupported = Boolean(capabilities && capabilities.torch);
       this.torchEnabled = Boolean(settings && settings.torch);
@@ -304,44 +375,63 @@
         return;
       }
 
-      const advanced = [
-        { focusMode: "continuous" },
-        { focusMode: "single-shot" },
-        { exposureMode: "continuous" },
-      ];
-
-      if (capabilities && capabilities.zoom && capabilities.zoom.max && capabilities.zoom.max >= 1.5) {
-        const preferredZoom = Math.min(2, Math.max(1, capabilities.zoom.max * 0.45));
-        advanced.push({ zoom: preferredZoom });
+      // Apply only verified capabilities; never request autofocus and single-shot
+      // together, and never increase zoom automatically (decision 3A).
+      const focusModes = capabilities && capabilities.focusMode;
+      const exposureModes = capabilities && capabilities.exposureMode;
+      const advanced = {};
+      if (Array.isArray(focusModes) && focusModes.includes("continuous")) {
+        advanced.focusMode = "continuous";
+      } else if (Array.isArray(focusModes) && focusModes.includes("single-shot")) {
+        advanced.focusMode = "single-shot";
       }
-
-      try {
-        await this.html5QrCode.applyVideoConstraints({
-          advanced,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        });
-      } catch (_) {
-        try {
-          await this.html5QrCode.applyVideoConstraints({
-            advanced,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          });
-        } catch (_) {
-          // Camera tuning is best-effort and must never block scanning.
+      if (Array.isArray(exposureModes) && exposureModes.includes("continuous")) {
+        advanced.exposureMode = "continuous";
+      }
+      if (this.sessionId > 0 && this.running) {
+        // Resolution is best-effort: ask for a supported setting, then read
+        // getRunningTrackSettings() instead of assuming that it was accepted.
+        const constraints = {};
+        if (capabilities && capabilities.width && capabilities.height && settings) {
+          const maxWidth = Number(capabilities.width.max);
+          const maxHeight = Number(capabilities.height.max);
+          const ratio = Number(settings.width) / Number(settings.height);
+          if (maxWidth >= 640 && maxHeight >= 480 && Number.isFinite(ratio) && ratio > 0) {
+            // Preserve the stream aspect ratio so html5-qrcode's existing
+            // crop/overlay geometry is not invalidated by a 16:9 switch.
+            const idealWidth = Math.floor(Math.min(1920, maxWidth, maxHeight * ratio));
+            const idealHeight = Math.floor(idealWidth / ratio);
+            if (idealHeight >= 480) {
+              constraints.width = { ideal: idealWidth };
+              constraints.height = { ideal: idealHeight };
+            }
+          }
+        }
+        if (Object.keys(advanced).length) constraints.advanced = [advanced];
+        if (Object.keys(constraints).length) {
+          try {
+            await instance.applyVideoConstraints(constraints);
+          } catch (_) {
+            // Unsupported tuning is never a scanning failure. Retry focus alone.
+            if (Object.keys(advanced).length) {
+              try {
+                await instance.applyVideoConstraints({ advanced: [advanced] });
+              } catch (_) { /* Keep the camera's working settings. */ }
+            }
+          }
         }
       }
 
-      const refreshedSettings = typeof this.html5QrCode.getRunningTrackSettings === "function"
-        ? this.html5QrCode.getRunningTrackSettings()
-        : null;
+      if (this.html5QrCode !== instance || !this.running) return;
+      const refreshedSettings = typeof instance.getRunningTrackSettings === "function"
+        ? instance.getRunningTrackSettings() : null;
       this.torchEnabled = Boolean(refreshedSettings && refreshedSettings.torch);
       this.emitState();
     }
 
-    async handleDecodedResult(decodedText, decodedResult) {
-      if (this.resultBusy) {
+    async handleDecodedResult(decodedText, decodedResult, session) {
+      if (session !== undefined && session !== this.sessionId) return;
+      if (!this.running || this.resultBusy) {
         return;
       }
 
@@ -360,7 +450,12 @@
 
       try {
         if (this.options.mode === "single") {
+          const acceptedSession = this.sessionId;
           await this.stop({ emitStatus: false });
+          // Do not deliver a result after another close/reopen operation.
+          if (this.sessionId !== acceptedSession + 1) return;
+        } else if (session !== undefined && session !== this.sessionId) {
+          return;
         }
         await this.emitResult(text, metadata);
       } catch (cause) {
@@ -373,6 +468,139 @@
       } finally {
         this.resultBusy = false;
       }
+    }
+
+    alignScanOverlay() {
+      if (typeof document === "undefined") return;
+      const target = document.getElementById(this.elementId);
+      if (!target) return;
+      const video = target.querySelector("video");
+      const shade = target.querySelector("#qr-shaded-region");
+      if (!video || !shade || !video.clientWidth || !video.clientHeight) return;
+      // html5-qrcode sizes shading from video.clientWidth/Height, but its
+      // absolute borders otherwise stretch to our responsive square wrapper.
+      // Constrain shading to the actual video surface in non-1:1 fallbacks.
+      shade.style.right = "auto";
+      shade.style.bottom = "auto";
+      shade.style.width = `${video.clientWidth}px`;
+      shade.style.height = `${video.clientHeight}px`;
+    }
+
+    watchViewportResize(session) {
+      if (typeof global.addEventListener !== "function" || typeof document === "undefined") return;
+      const target = document.getElementById(this.elementId);
+      if (!target) return;
+      this.scanViewportSize = {
+        width: target.clientWidth,
+        height: target.clientHeight,
+      };
+      this.resizeHandler = () => {
+        if (this.sessionId !== session || !this.running) return;
+        const box = document.getElementById(this.elementId);
+        if (!box || !this.scanViewportSize) return;
+        if (Math.abs(box.clientWidth - this.scanViewportSize.width) < 12
+          && Math.abs(box.clientHeight - this.scanViewportSize.height) < 12) return;
+        if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
+        this.resizeTimer = setTimeout(async () => {
+          this.resizeTimer = null;
+          if (this.sessionId !== session || !this.running) return;
+          // The scanner must recompute its internal crop, not merely CSS.
+          await this.stop({ emitStatus: false });
+          if (this.sessionId !== session + 1) return; // user also closed it
+          try { await this.start(); } catch (_) { /* Normal camera error callback. */ }
+        }, 400);
+      };
+      global.addEventListener("resize", this.resizeHandler);
+    }
+
+    clearViewportResize() {
+      if (this.resizeTimer !== null) {
+        clearTimeout(this.resizeTimer);
+        this.resizeTimer = null;
+      }
+      if (this.resizeHandler && typeof global.removeEventListener === "function") {
+        global.removeEventListener("resize", this.resizeHandler);
+      }
+      this.resizeHandler = null;
+      this.scanViewportSize = null;
+    }
+
+    startAdaptiveScanning(session) {
+      this.clearAdaptiveScanning();
+      if (!this.options.adaptiveScan || typeof global.jsQR !== "function"
+        || typeof global.QrImageDecoder !== "function") return;
+      try {
+        this.adaptiveDecoder = new global.QrImageDecoder({ formats: ["qr_code"] });
+      } catch (_) { return; }
+      const schedule = (delay) => {
+        this.adaptiveTimer = setTimeout(() => {
+          this.adaptiveTimer = null;
+          if (session !== this.sessionId || !this.running || this.resultBusy) return;
+          try {
+            const imageData = this.captureVisibleQrBox();
+            const text = imageData && this.adaptiveDecoder.decodeCameraFrame(imageData);
+            if (text) {
+              // Shared result gate prevents double callback across both decoders.
+              void this.handleDecodedResult(text, { format: { formatName: "QR_CODE" } }, session);
+            }
+          } catch (_) {
+            // The standard html5-qrcode decoder remains active and uninterrupted.
+          } finally {
+            if (session === this.sessionId && this.running && !this.resultBusy) {
+              schedule(this.options.adaptiveInterval);
+            }
+          }
+        }, delay);
+      };
+      schedule(this.options.adaptiveDelay);
+    }
+
+    clearAdaptiveScanning() {
+      if (this.adaptiveTimer !== null) {
+        clearTimeout(this.adaptiveTimer);
+        this.adaptiveTimer = null;
+      }
+      this.adaptiveDecoder = null;
+      this.adaptiveCanvas = null;
+    }
+
+    captureVisibleQrBox() {
+      if (typeof document === "undefined") return null;
+      const target = document.getElementById(this.elementId);
+      if (!target) return null;
+      const video = target.querySelector("video");
+      // html5-qrcode's four dark borders are the authoritative crop boundary.
+      const shade = target.querySelector("#qr-shaded-region");
+      if (!video || !shade || video.readyState < 2 || !video.videoWidth || !video.videoHeight
+        || typeof global.getComputedStyle !== "function") return null;
+      const videoRect = video.getBoundingClientRect();
+      const shadeRect = shade.getBoundingClientRect();
+      const style = global.getComputedStyle(shade);
+      const left = shadeRect.left + (parseFloat(style.borderLeftWidth) || 0);
+      const right = shadeRect.right - (parseFloat(style.borderRightWidth) || 0);
+      const top = shadeRect.top + (parseFloat(style.borderTopWidth) || 0);
+      const bottom = shadeRect.bottom - (parseFloat(style.borderBottomWidth) || 0);
+      const size = Math.min(right - left, bottom - top);
+      if (size < 50 || videoRect.width <= 0 || videoRect.height <= 0) return null;
+      // Do not scan outside the guide, even when CSS/layout change unexpectedly.
+      if (left < videoRect.left - 1 || top < videoRect.top - 1
+        || right > videoRect.right + 1 || bottom > videoRect.bottom + 1) return null;
+
+      const x = (left - videoRect.left) / videoRect.width * video.videoWidth;
+      const y = (top - videoRect.top) / videoRect.height * video.videoHeight;
+      const width = (right - left) / videoRect.width * video.videoWidth;
+      const height = (bottom - top) / videoRect.height * video.videoHeight;
+      if (x < 0 || y < 0 || x + width > video.videoWidth + 2
+        || y + height > video.videoHeight + 2) return null;
+      const outputSide = Math.max(1, Math.min(640, Math.round(Math.min(width, height))));
+      if (!this.adaptiveCanvas) this.adaptiveCanvas = document.createElement("canvas");
+      const canvas = this.adaptiveCanvas;
+      if (canvas.width !== outputSide) canvas.width = outputSide;
+      if (canvas.height !== outputSide) canvas.height = outputSide;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(video, x, y, width, height, 0, 0, outputSide, outputSide);
+      return context.getImageData(0, 0, outputSide, outputSide);
     }
 
     isDuplicate(text) {
