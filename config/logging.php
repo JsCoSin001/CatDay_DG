@@ -52,6 +52,14 @@ return [
 
     'channels' => [
 
+        'qr_scan' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/qr-scan.log'),
+            'level' => 'info',
+            'days' => 7,
+            'replace_placeholders' => true,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),

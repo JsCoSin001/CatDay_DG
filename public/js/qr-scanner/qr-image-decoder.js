@@ -76,18 +76,27 @@
       return this.tryDecodeCandidates(imageData);
     }
 
-    // Lightweight, bounded fallback for live video. No regions, scaling or
-    // native BarcodeDetector: those belong to the existing file-only path.
+    // Bounded live-video fallback. Keep the original first and only enlarge
+    // small crops; one synchronous jsQR call itself cannot be interrupted.
     decodeCameraFrame(imageData) {
       if (!imageData || !imageData.data || typeof global.jsQR !== "function") return null;
+      const now = () => global.performance && typeof global.performance.now === "function"
+        ? global.performance.now() : Date.now();
+      const deadline = now() + 120;
+      const side = Math.max(imageData.width, imageData.height);
       const candidateBuilders = [
         () => imageData,
+        ...(side > 0 && side < 400
+          ? [() => this.scaleImageData(imageData, Math.min(2, 960 / side), true)]
+          : []),
         () => this.createGrayscaleBoostVariant(imageData),
         () => this.createHighContrastVariant(imageData),
         () => this.createThresholdVariant(imageData, 140),
       ];
       for (const build of candidateBuilders) {
+        if (now() >= deadline) break;
         const candidate = build();
+        if (now() >= deadline) break;
         const found = global.jsQR(candidate.data, candidate.width, candidate.height, {
           inversionAttempts: "dontInvert",
         });
@@ -198,7 +207,7 @@
       return new ImageData(data, width, height);
     }
 
-    scaleImageData(imageData, scale) {
+    scaleImageData(imageData, scale, imageSmoothingEnabled = false) {
       const sourceCanvas = document.createElement("canvas");
       sourceCanvas.width = imageData.width;
       sourceCanvas.height = imageData.height;
@@ -215,7 +224,7 @@
       if (!targetContext) {
         return imageData;
       }
-      targetContext.imageSmoothingEnabled = false;
+      targetContext.imageSmoothingEnabled = imageSmoothingEnabled;
       targetContext.drawImage(sourceCanvas, 0, 0, targetCanvas.width, targetCanvas.height);
       return targetContext.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
     }

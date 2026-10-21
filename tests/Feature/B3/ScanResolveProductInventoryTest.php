@@ -26,11 +26,11 @@ class ScanResolveProductInventoryTest extends TestCase
             ['id' => 30, 'SoCuon' => 1, 'ChieuDai_1cuon' => 100, 'ThongTinNhapKho_ID' => 20],
             ['id' => 31, 'SoCuon' => 2, 'ChieuDai_1cuon' => 200, 'ThongTinNhapKho_ID' => 21],
         ]);
-        DB::table('KeHoach')->insert(['id' => 1, 'MaKeHoach' => 'KH-A', 'NgayKeHoach' => '2026-10-01', 'TrangThai' => 'ACTIVE']);
+        DB::table('KeHoach')->insert(['id' => 1, 'Users_id' => 1, 'MaKeHoach' => 'KH-A', 'NgayKeHoach' => '2026-10-01', 'TrangThai' => 'ACTIVE']);
         DB::table('KeHoachHang')->insert(['id' => 40, 'KeHoach_ID' => 1, 'DanhSachMaSP_ID' => 1, 'SoLuongCuonCanLay' => 1, 'ChieuDai1Cuon_KeHoach' => 100]);
         DB::table('KeHoachCatNhom')->insert(['id' => 50, 'KeHoachHang_ID' => 40]);
         DB::table('KeHoachCatChiTiet')->insert(['id' => 60, 'KeHoachCatNhom_ID' => 50, 'ChieuDaiCanCat' => 40]);
-        DB::table('KeHoach')->insert(['id' => 2, 'MaKeHoach' => 'KH-OLD', 'NgayKeHoach' => '2026-01-01', 'TrangThai' => 'HUY']);
+        DB::table('KeHoach')->insert(['id' => 2, 'Users_id' => 1, 'MaKeHoach' => 'KH-OLD', 'NgayKeHoach' => '2026-01-01', 'TrangThai' => 'HUY']);
         DB::table('KeHoachHang')->insert(['id' => 41, 'KeHoach_ID' => 2, 'DanhSachMaSP_ID' => 1, 'SoLuongCuonCanLay' => 1]);
         DB::table('LichSuLayCuon')->insert(['KeHoachHang_ID' => 41, 'TTCuonDay_ID' => 30, 'SoLuong' => 1, 'NguoiThucHien' => 'worker']);
     }

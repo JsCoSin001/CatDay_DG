@@ -51,21 +51,22 @@
   cursor: pointer;
 }
 .qr-lib-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 16px max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   background: #f8fafc;
 }
-.qr-lib-status { flex: 0 0 auto; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px; background: #eef4ff; color: #385675; font-size: 13px; line-height: 1.45; }
+.qr-lib-status { position: absolute; z-index: 2; top: 16px; left: max(20px, env(safe-area-inset-left)); right: max(20px, env(safe-area-inset-right)); padding: 10px 12px; border-radius: 8px; background: #eef4ff; color: #385675; font-size: 13px; line-height: 1.45; }
 .qr-lib-status[data-level="error"] { background: #fff1f2; color: #be123c; }
 .qr-lib-status[hidden] { display: none !important; }
 .qr-lib-region {
-  flex: 0 0 auto;
-  width: min(100%, 70dvh, 680px);
-  aspect-ratio: 1 / 1;
+  flex: 1 1 0%;
+  width: 100%;
+  aspect-ratio: auto;
   min-height: 0;
   margin: 0 auto;
   position: relative;
@@ -73,8 +74,42 @@
   border-radius: 10px;
   background: #020617;
 }
-/* Preserve the video/overlay mapping calculated by html5-qrcode. */
+/* Scale the video and its guide together. Keep layout dimensions unchanged
+   so html5-qrcode can still map its crop to the original video pixels. */
 .qr-lib-region video { width: 100% !important; height: auto !important; }
+.qr-lib-region video,
+.qr-lib-region #qr-shaded-region {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) scale(var(--qr-preview-scale, 1));
+  transform-origin: center;
+}
+.qr-lib-region #qr-shaded-region {
+  width: var(--qr-preview-width, 100%) !important;
+  height: var(--qr-preview-height, 100%) !important;
+}
+/* Keep the vendor corner strokes at their original screen size. */
+.qr-lib-region #qr-shaded-region > div:nth-child(-n+4) {
+  width: calc(40px / var(--qr-preview-scale, 1)) !important;
+  height: calc(5px / var(--qr-preview-scale, 1)) !important;
+}
+.qr-lib-region #qr-shaded-region > div:nth-child(n+5) {
+  width: calc(5px / var(--qr-preview-scale, 1)) !important;
+  height: calc(45px / var(--qr-preview-scale, 1)) !important;
+}
+.qr-lib-region #qr-shaded-region > div:is(:nth-child(1), :nth-child(2), :nth-child(5), :nth-child(7)) {
+  top: calc(-5px / var(--qr-preview-scale, 1)) !important;
+}
+.qr-lib-region #qr-shaded-region > div:is(:nth-child(3), :nth-child(4), :nth-child(6), :nth-child(8)) {
+  bottom: calc(-5px / var(--qr-preview-scale, 1)) !important;
+}
+.qr-lib-region #qr-shaded-region > div:is(:nth-child(5), :nth-child(6)) {
+  left: calc(-5px / var(--qr-preview-scale, 1)) !important;
+}
+.qr-lib-region #qr-shaded-region > div:is(:nth-child(7), :nth-child(8)) {
+  right: calc(-5px / var(--qr-preview-scale, 1)) !important;
+}
 .qr-lib-actions { flex: 0 0 auto; display: flex; gap: 10px; margin-top: 12px; }
 .qr-lib-button {
   flex: 1;
@@ -89,7 +124,7 @@
   cursor: pointer;
 }
 .qr-lib-button:hover { background: #f8fafc; }
-.qr-lib-button-torch { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.qr-lib-actions[hidden],
 .qr-lib-button[hidden] { display: none !important; }
 
 @media (max-width: 520px) {
@@ -104,6 +139,7 @@
     padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
   .qr-lib-region { border-radius: 8px; }
+  .qr-lib-status { top: 12px; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); }
   .qr-lib-actions { gap: 8px; }
   .qr-lib-button { min-height: 48px; }
 }

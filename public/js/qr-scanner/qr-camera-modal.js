@@ -75,11 +75,9 @@
             this.options.onError(error);
           }
         },
-        onStateChange: (state) => this.syncState(state),
       });
 
       this.bindEvents();
-      this.syncState(this.scanner.getState());
     }
 
     buildDom() {
@@ -101,7 +99,6 @@
             <div class="qr-lib-status" data-role="status">Đang chuẩn bị camera...</div>
             <div class="qr-lib-region" id="${this.regionId}"></div>
             <div class="qr-lib-actions">
-              <button type="button" class="qr-lib-button qr-lib-button-torch" data-role="torch" hidden>Bật đèn</button>
               <button type="button" class="qr-lib-button" data-role="image">Chọn ảnh QR</button>
             </div>
             <input type="file" data-role="image-input" accept="image/*" hidden>
@@ -115,7 +112,6 @@
       this.root = wrapper;
       this.statusElement = wrapper.querySelector('[data-role="status"]');
       this.closeButton = wrapper.querySelector('[data-role="close"]');
-      this.torchButton = wrapper.querySelector('[data-role="torch"]');
       this.imageButton = wrapper.querySelector('[data-role="image"]');
       this.imageInput = wrapper.querySelector('[data-role="image-input"]');
 
@@ -124,6 +120,7 @@
       }
       if (!this.options.allowImage) {
         this.imageButton.hidden = true;
+        wrapper.querySelector(".qr-lib-actions").hidden = true;
       }
     }
 
@@ -132,13 +129,6 @@
       this.root.addEventListener("click", (event) => {
         if (event.target === this.root) {
           this.close();
-        }
-      });
-      this.torchButton.addEventListener("click", async () => {
-        try {
-          await this.scanner.toggleTorch();
-        } catch (_) {
-          // Error already surfaced by scanner callback.
         }
       });
       this.imageButton.addEventListener("click", () => {
@@ -207,12 +197,6 @@
       this.statusElement.textContent = normalized;
       this.statusElement.hidden = normalized === "";
       this.statusElement.dataset.level = level || "info";
-    }
-
-    syncState(state) {
-      const showTorch = Boolean(state && state.running && state.torchSupported);
-      this.torchButton.hidden = !showTorch;
-      this.torchButton.textContent = state && state.torchEnabled ? "Tắt đèn" : "Bật đèn";
     }
 
     async handleImageSelection() {

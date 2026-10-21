@@ -254,7 +254,7 @@ button { touch-action: manipulation; }
     background: #fff;
 }
 .app-table {
-    min-width: 1250px;
+    min-width: 1380px;
     table-layout: fixed;
     font-size: .9rem;
 }
@@ -273,15 +273,32 @@ button { touch-action: manipulation; }
 }
 .app-table thead th:nth-child(1) { width: 150px; }
 .app-table thead th:nth-child(2) { width: 280px; }
-.app-table thead th:nth-child(3) { width: 130px; }
-.app-table thead th:nth-child(4) { width: 150px; }
-.app-table thead th:nth-child(5),
-.app-table thead th:nth-child(6) { width: 110px; }
-.app-table thead th:nth-child(7) { width: 150px; }
-.app-table thead th:nth-child(8) { width: 170px; }
-.app-table tbody td:nth-child(8) { white-space: nowrap; }
+.app-table thead th:nth-child(3) { width: 170px; }
+.app-table thead th:nth-child(4) { width: 130px; }
+.app-table thead th:nth-child(5) { width: 130px; }
+.app-table thead th:nth-child(6) { width: 150px; }
+.app-table thead th:nth-child(7),
+.app-table thead th:nth-child(8) { width: 110px; }
+.app-table thead th:nth-child(9) { width: 150px; }
+.app-table tbody td:nth-child(3) { white-space: nowrap; }
 .app-table tbody tr:nth-child(even) { background: #fbfdff; }
 .app-table tbody tr:hover { background: #f2f7fd; }
+.b3-status-badge {
+    display: inline-block;
+    max-width: 100%;
+    padding: .4em .65em;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: .76rem;
+    font-weight: 650;
+    line-height: 1.35;
+    white-space: normal;
+    text-align: center;
+    vertical-align: middle;
+}
+.b3-status-progress { background: #fff3cd; color: #664d03; border-color: #ffda6a; }
+.b3-status-done { background: #d1e7dd; color: #0f5132; border-color: #a3cfbb; }
+.b3-status-pending { background: #fff; color: #374151; border-color: #cbd5e1; }
 .cell-plan { font-weight: 800; color: #075fb4; }
 .cell-product { font-weight: 700; color: #263d55; }
 .cell-muted { color: #8491a2; }
@@ -331,44 +348,6 @@ button { touch-action: manipulation; }
 .mobile-pagination { display: none; align-items: center; justify-content: center; gap: 18px; }
 .mobile-pagination span { min-width: 110px; text-align: center; color: #41576f; font-weight: 750; }
 
-/* Bottom sheet */
-.bottom-sheet-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 2147483100;
-    background: rgba(15, 23, 42, .48);
-}
-.bottom-sheet {
-    position: fixed;
-    z-index: 2147483101;
-    left: 10px;
-    right: 10px;
-    bottom: max(10px, env(safe-area-inset-bottom));
-    width: auto;
-    max-height: calc(100dvh - 20px - env(safe-area-inset-top));
-    overflow: hidden;
-    border-radius: 14px;
-    background: #fff;
-    box-shadow: 0 -22px 50px rgba(18, 39, 64, .22);
-    animation: bottomSheetIn .26s cubic-bezier(.2, .8, .2, 1);
-}
-.bottom-sheet[hidden], .bottom-sheet-backdrop[hidden] { display: none !important; }
-.bottom-sheet-handle { width: 48px; height: 5px; margin: 10px auto 2px; border-radius: 999px; background: #d0d9e4; }
-.bottom-sheet-content { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
-.bottom-sheet-status-icon {
-    width: 46px;
-    height: 46px;
-    display: grid;
-    place-items: center;
-    margin-bottom: 12px;
-    border-radius: 50%;
-    background: #eaf8ef;
-    color: #1e8b4d;
-    font-size: 1.45rem;
-    font-weight: 900;
-}
-.bottom-sheet-copy h2 { margin: 0; font-size: 1.1rem; font-weight: 850; }
-.bottom-sheet-copy p { margin: 6px 0 9px; color: var(--app-muted); font-size: .88rem; }
 .qr-result-value {
     max-height: 120px;
     overflow: auto;
@@ -381,11 +360,9 @@ button { touch-action: manipulation; }
     font-size: .88rem;
     overflow-wrap: anywhere;
 }
-.bottom-sheet-close { width: 100%; margin-top: 16px; }
-@keyframes bottomSheetIn { from { transform: translateY(28px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 
-/* B3 notifications: top-center, interactive cards above scanner, decision overlay and Loading. */
+/* Notifications stay above camera/loading; confirmation messageboxes take priority. */
 .app-alert-host {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top));
@@ -510,12 +487,22 @@ button { touch-action: manipulation; }
 .d-none { display: none !important; }
 
 /* --------------------------------------------------------------------------
-   B3 result UI prototype
-   Chỉ mô phỏng cách trình bày sau khi QR được resolve. Không chứa DB logic.
+   B3 fullscreen result page
+   Thông tin và thao tác sau khi đọc QR.
    -------------------------------------------------------------------------- */
-.b3-result-sheet { overflow: hidden; }
+.b3-result-page[hidden] { display: none !important; }
+.b3-result-page {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    height: 100vh;
+    height: 100dvh;
+    background: #fff;
+    overflow: hidden;
+}
 .b3-result-shell {
-    max-height: calc(100dvh - 44px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    height: 100%;
+    min-height: 0;
     display: flex;
     flex-direction: column;
 }
@@ -525,7 +512,7 @@ button { touch-action: manipulation; }
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    padding: 10px 18px 12px;
+    padding: max(12px, env(safe-area-inset-top)) 18px 12px;
     border-bottom: 1px solid var(--app-border);
 }
 .b3-result-eyebrow {
@@ -542,6 +529,7 @@ button { touch-action: manipulation; }
     font-weight: 750;
 }
 .b3-result-close { flex: 0 0 auto; margin-top: 4px; }
+.b3-result-back { flex: 0 0 auto; min-height: 44px; }
 .b3-mock-toolbar {
     flex: 0 0 auto;
     display: grid;
@@ -602,6 +590,7 @@ button { touch-action: manipulation; }
     border-radius: 10px;
     background: #eef3f8;
 }
+.b3-operation-tabs:has(.b3-operation-tab[hidden]) { grid-template-columns: 1fr; }
 .b3-operation-tab {
     min-height: 46px;
     border: 0;
@@ -697,15 +686,16 @@ button { touch-action: manipulation; }
 .b3-after-cut-card {
     margin-top: 16px;
     padding: 18px 14px;
-    border: 1px solid #9cc6ff;
+    border: 2px solid #73aaf6;
     border-radius: 12px;
-    background: linear-gradient(180deg, #f4f9ff 0%, #eaf4ff 100%);
+    background: linear-gradient(180deg, #eff7ff 0%, #dcecff 100%);
+    box-shadow: 0 6px 18px rgba(13, 94, 215, .12);
     text-align: center;
 }
 .b3-after-cut-label {
     display: block;
     color: #315b85;
-    font-size: .78rem;
+    font-size: .9rem;
     font-weight: 700;
     letter-spacing: .05em;
 }
@@ -717,6 +707,7 @@ button { touch-action: manipulation; }
     font-weight: 950;
     line-height: 1;
     letter-spacing: -.04em;
+    overflow-wrap: anywhere;
 }
 .b3-after-cut-card small {
     display: block;
@@ -798,11 +789,12 @@ button { touch-action: manipulation; }
 .b3-decision-overlay {
     position: fixed;
     inset: 0;
-    z-index: 2147483400;
+    z-index: 2147483640;
     display: grid;
     place-items: center;
     padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
-    background: rgba(0, 0, 0, .52);
+    background: rgba(0, 0, 0, .76);
+    backdrop-filter: blur(5px);
     opacity: 0;
     transition: opacity .2s ease;
     overscroll-behavior: contain;
@@ -823,6 +815,30 @@ button { touch-action: manipulation; }
     transform: translateY(8px) scale(.97);
     transition: opacity .2s ease, transform .22s cubic-bezier(.2, .8, .2, 1);
 }
+.b3-cut-settings-card { max-height: 100%; overflow-y: auto; }
+#b3-qr-error-dialog .b3-decision-card { display: grid; gap: 16px; }
+.b3-cut-session { margin: 0 0 20px; padding: 14px; background: #f4f8fc; border: 1px solid #dae5f0; border-radius: 12px; }
+.b3-footer-continuous[hidden] { display: none; }
+.b3-session-reel { display: grid; gap: 4px; margin-bottom: 12px; }
+.b3-session-reel strong { overflow-wrap: anywhere; font-size: .85rem; }
+.b3-session-values { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.b3-session-values div { display: grid; gap: 4px; }
+.b3-session-values span,.b3-session-reel span { color: #53697f; font-size: .78rem; }
+.b3-session-values strong { overflow-wrap: anywhere; }
+.b3-last-cut { margin: 12px 0 0; color: #17603e; font-size: .85rem; }
+.b3-cut-recovery { margin-top: 14px; padding: 12px; border: 1px solid #e6bf60; border-radius: 8px; background: #fff8df; }
+.b3-cut-recovery p { margin: 0 0 10px; }
+.b3-cut-recovery .btn { margin: 4px; }
+@media (max-width: 600px) { .b3-session-values { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+.b3-decision-overlay:has(.b3-cut-settings-card) { touch-action: pan-y; }
+.b3-cut-settings-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.b3-cut-settings-header h2 { margin: 0; }
+.b3-cut-settings-close { flex: 0 0 44px; min-height: 44px; border: 1px solid #dbe5ef; border-radius: 8px; background: #fff; color: #53697f; font-size: 1.5rem; }
+#b3-cut-settings-form { display: grid; gap: 16px; }
+#b3-cut-settings-form .b3-input-block { margin: 0; }
+#b3-cut-settings-confirm { width: 100%; min-height: 48px; }
+.b3-cut-settings-error { display: block; color: #b42318; font-size: .82rem; margin-top: 6px; }
+.b3-cut-settings-error[hidden] { display: none; }
 .b3-decision-overlay.is-visible .b3-decision-card {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -939,6 +955,12 @@ button { touch-action: manipulation; }
     margin: 0 10px 10px;
     max-height: 90px;
 }
+.b3-plan-details { margin-top: 0; }
+.b3-plan-details .b3-context-card {
+    border: 0;
+    border-top: 1px solid #e0e7ef;
+    border-radius: 0;
+}
 .b3-result-footer {
     flex: 0 0 auto;
     display: flex;
@@ -949,7 +971,7 @@ button { touch-action: manipulation; }
     border-top: 1px solid #dfe7f1;
     background: rgba(255,255,255,.98);
     box-shadow: 0 -8px 22px rgba(31, 54, 80, .07);
-    border-radius: 0 0 14px 14px;
+    border-radius: 0;
 }
 .b3-footer-continuous {
     min-height: 44px;
@@ -979,7 +1001,7 @@ button { touch-action: manipulation; }
     .b3-operation-tab { min-height: 48px; font-size: .82rem; }
     .b3-operation-panel { padding: 13px; }
     .b3-cut-layout { grid-template-columns: 1fr; }
-    .b3-cut-side { order: -1; }
+    .b3-cut-side { order: 0; }
     .b3-detail-list { padding: 10px; }
     .b3-after-cut-card strong { font-size: clamp(3.4rem, 18vw, 5.4rem); }
     .b3-result-footer { display: block; padding: 8px 12px max(12px, calc(env(safe-area-inset-bottom) + 8px)); }
@@ -1053,9 +1075,9 @@ button { touch-action: manipulation; }
 @keyframes b3-loading-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .b3-loading-spinner { animation-duration: 1.5s; } }
 
-/* B3: only the sheet content scrolls; nested decision locks the lower layer. */
-.b3-result-sheet.b3-decision-active { pointer-events: none; }
-.b3-result-sheet.b3-decision-active .b3-result-scroll {
+/* Keep confirmations focused while the result page remains underneath. */
+.b3-result-page.b3-decision-active { pointer-events: none; }
+.b3-result-page.b3-decision-active .b3-result-scroll {
     overflow: hidden;
     touch-action: none;
 }

@@ -18,4 +18,5 @@ Route::middleware(['b3.request-id','auth','active.user'])->group(function(){
  Route::post('/api/b3/scan/resolve',[ScanController::class,'resolve']);
  Route::post('/api/b3/execute/take-whole',[ExecutionController::class,'takeWhole']);
  Route::post('/api/b3/execute/cut',[ExecutionController::class,'cut']);
+ Route::get('/api/b3/cut-session',[ExecutionController::class,'cutSession']);
 });

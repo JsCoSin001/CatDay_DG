@@ -27,7 +27,7 @@ class InventoryRepository
         return $row ? (array) $row : null;
     }
 
-    public function fullByMaBin(string $maBin): ?array
+    public function fullByMaBin(string $maBin, ?int $length = null): ?array
     {
         $row = DB::table('TTThanhPham as TP')
             ->join('TTNhapKhoTP as NK', 'NK.TTThanhPham_ID', '=', 'TP.id')
@@ -36,12 +36,27 @@ class InventoryRepository
             ->where('TP.NhapKho', 1)
             ->where('TP.Temp', 0)
             ->whereNull('CD.SoDau')->whereNull('CD.SoCuoi')
+            ->when($length !== null, fn($q) => $q->where('CD.ChieuDai_1cuon', $length))
             ->select('TP.id as tt_thanh_pham_id', 'TP.DanhSachSP_ID as product_id', 'TP.MaBin as ma_bin')
             ->first();
         if (!$row) return null;
         $a = (array) $row;
-        $a['actual'] = $this->fullActualForMaBin($maBin, (int)$a['product_id']);
+        $a['actual'] = $this->fullActualForMaBin($maBin, (int)$a['product_id'], $length);
         return $a;
+    }
+
+    public function fullMaBinsByCode(string $code): array
+    {
+        return DB::table('TTThanhPham as TP')
+            ->join('TTNhapKhoTP as NK', 'NK.TTThanhPham_ID', '=', 'TP.id')
+            ->join('TTCuonDay as CD', 'CD.ThongTinNhapKho_ID', '=', 'NK.id')
+            // Match a literal segment; QR values containing % or _ are not wildcards.
+            ->whereRaw('instr(TP.MaBin, ?) > 0', ['-'.$code.'/'])
+            ->where('TP.NhapKho', 1)->where('TP.Temp', 0)
+            ->whereNull('CD.SoDau')->whereNull('CD.SoCuoi')
+            ->select('TP.id as tt_thanh_pham_id', 'TP.DanhSachSP_ID as product_id',
+                'TP.MaBin as ma_bin', 'CD.ChieuDai_1cuon as standard_length')
+            ->distinct()->get()->map(fn($row) => (array) $row)->all();
     }
 
     // Only TAKE needs this extra identity check: ambiguous MaBin must not
@@ -77,14 +92,19 @@ class InventoryRepository
         return $this->eligibleFullSources($productId, $standardLength, $maBin)[0] ?? null;
     }
 
+    public function fifoFullSourceForMaBins(array $maBins, int $productId, int $standardLength): ?array
+    {
+        return $this->eligibleFullSources($productId, $standardLength, $maBins)[0] ?? null;
+    }
+
     // TAKE must not inherit CUT's optional length/MaBin filters or its historical
     // zero-clamping of malformed inventory. This accessor is only used by TAKE.
     public function eligibleFullSourcesForTake(int $productId): array
     {
-        return $this->eligibleFullSources($productId, null, null, true);
+        throw new \LogicException('Unfiltered whole-reel TAKE is forbidden; use fifoFullSourceForMaBin.');
     }
 
-    public function eligibleFullSources(int $productId, ?int $standardLength = null, ?string $maBin = null, bool $strict = false): array
+    public function eligibleFullSources(int $productId, ?int $standardLength = null, string|array|null $maBin = null, bool $strict = false): array
     {
         $query = DB::table('TTCuonDay as CD')
             ->join('TTNhapKhoTP as NK', 'NK.id', '=', 'CD.ThongTinNhapKho_ID')
@@ -93,7 +113,8 @@ class InventoryRepository
             ->where('TP.NhapKho', 1)->where('TP.Temp', 0)
             ->whereNull('CD.SoDau')->whereNull('CD.SoCuoi');
         if ($standardLength !== null) $query->where('CD.ChieuDai_1cuon', $standardLength);
-        if ($maBin !== null) $query->where('TP.MaBin', $maBin);
+        if (is_array($maBin)) $query->whereIn('TP.MaBin', $maBin);
+        elseif ($maBin !== null) $query->where('TP.MaBin', $maBin);
 
         $rows = $query->select(
             'CD.id', 'CD.SoCuon', 'CD.ChieuDai_1cuon', 'CD.DateInsert', 'CD.Ngay',
@@ -113,7 +134,7 @@ class InventoryRepository
         $out=[];
         foreach ($rows as $r) {
             $rawRemaining = (int)$r->SoCuon - (int)($take[$r->id] ?? 0) - (int)($cut[$r->id] ?? 0);
-            if ($strict && ($r->SoCuon === null || (int)$r->SoCuon < 0 || $rawRemaining < 0)) {
+            if ($strict && ($r->SoCuon === null || (int)$r->SoCuon < 0 || $rawRemaining < 0 || (int)$r->ChieuDai_1cuon <= 0)) {
                 throw B3Exception::make('STALE_DATA', 'Dữ liệu tồn cuộn chẵn bất thường. Vui lòng kiểm tra lại.', 409);
             }
             $remaining = max(0, $rawRemaining);
@@ -134,14 +155,24 @@ class InventoryRepository
             ->sum('CT.ChieuDaiCanCat');
     }
 
-    public function fullReservedForProduct(int $productId): int
+    public function fullReservedForProductLength(int $productId, int $length): int
     {
-        $whole = DB::table('KeHoachHang as KH')->join('KeHoach as K','K.id','=','KH.KeHoach_ID')
+        $whole = DB::table('KeHoachHangQuyCachCuonChan as QC')
+            ->join('KeHoachHang as KH','KH.id','=','QC.KeHoachHang_ID')
+            ->join('KeHoach as K','K.id','=','KH.KeHoach_ID')
             ->where('K.TrangThai','ACTIVE')->where('KH.DanhSachMaSP_ID',$productId)
-            ->selectRaw('COALESCE(SUM(CASE WHEN KH.SoLuongCuonCanLay > COALESCE((SELECT SUM(LSL.SoLuong) FROM LichSuLayCuon LSL WHERE LSL.KeHoachHang_ID = KH.id),0) THEN KH.SoLuongCuonCanLay - COALESCE((SELECT SUM(LSL2.SoLuong) FROM LichSuLayCuon LSL2 WHERE LSL2.KeHoachHang_ID = KH.id),0) ELSE 0 END),0) v')->value('v');
-        $groups = DB::table('KeHoachCatNhom as N')->join('KeHoachHang as KH','KH.id','=','N.KeHoachHang_ID')->join('KeHoach as K','K.id','=','KH.KeHoach_ID')
-            ->where('K.TrangThai','ACTIVE')->where('KH.DanhSachMaSP_ID',$productId)->whereNull('N.TonCuonLe_ID')
-            ->whereExists(function($q){$q->selectRaw('1')->from('KeHoachCatChiTiet as CT')->leftJoin('LichSuCat as LS','LS.KeHoachCatChiTiet_ID','=','CT.id')->whereColumn('CT.KeHoachCatNhom_ID','N.id')->whereNull('LS.id');})->count();
-        return max(0,(int)$whole)+(int)$groups;
+            ->where('QC.ChieuDai1Cuon',$length)
+            ->selectRaw('COALESCE(SUM(MAX(0, QC.SoLuongCuonCanLay - COALESCE((SELECT SUM(LS.SoLuong) FROM LichSuLayCuon LS WHERE LS.QuyCachCuonChan_ID=QC.id),0))),0) v')
+            ->value('v');
+        $groups = DB::table('KeHoachCatNhom as N')
+            ->join('KeHoachHangQuyCachCuonChan as QC','QC.id','=','N.QuyCachCuonChan_ID')
+            ->join('KeHoachHang as KH','KH.id','=','QC.KeHoachHang_ID')
+            ->join('KeHoach as K','K.id','=','KH.KeHoach_ID')
+            ->where('K.TrangThai','ACTIVE')->where('KH.DanhSachMaSP_ID',$productId)
+            ->where('QC.ChieuDai1Cuon',$length)->whereNull('N.TonCuonLe_ID')
+            ->whereExists(function($q){$q->selectRaw('1')->from('KeHoachCatChiTiet as CT')
+                ->leftJoin('LichSuCat as LS','LS.KeHoachCatChiTiet_ID','=','CT.id')
+                ->whereColumn('CT.KeHoachCatNhom_ID','N.id')->whereNull('LS.id');})->count();
+        return max(0,(int)$whole) + $groups;
     }
 }

@@ -158,7 +158,8 @@ test('CSS supports scrolling text, responsive width, animation duration and z-la
   const hostZ=Number(css.match(/\.app-alert-host\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
   const overlayZ=Number(css.match(/\.b3-decision-overlay\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
   const loadingZ=Number(css.match(/\.b3-page-loading\s*\{[^}]*z-index:\s*(\d+)/s)?.[1]);
-  assert.ok(hostZ>overlayZ&&hostZ>loadingZ&&hostZ<=2147483647);
+  assert.ok(overlayZ>hostZ&&hostZ>loadingZ&&overlayZ<=2147483647,
+    'confirmation messageboxes must take priority over notifications');
   assert.match(css,/\.app-popup-alert-message\s*\{[^}]*max-height:/s);
   assert.match(css,/\.app-popup-alert-message\s*\{[^}]*overflow-y:\s*auto/s);
   assert.match(css,/@media\s*\(prefers-reduced-motion:\s*reduce\)/);

@@ -146,12 +146,13 @@
                         <tr>
                             <th>Mã kế hoạch</th>
                             <th>Tên sản phẩm</th>
+                            <th>Tình trạng</th>
+                            <th class="text-end">Chiều dài lấy</th>
                             <th class="text-end">Số lượng cuộn</th>
                             <th class="text-end">Số cuộn cắt lẻ</th>
                             <th class="text-end">Số đầu</th>
                             <th class="text-end">Số cuối</th>
                             <th>LOT</th>
-                            <th>Tình trạng</th>
                         </tr>
                     </thead>
                     <tbody id="plan-table-body"></tbody>
@@ -181,24 +182,25 @@
     </main>
 </div>
 
-<div id="qr-bottom-sheet-backdrop" class="bottom-sheet-backdrop" hidden></div>
-<section id="qr-bottom-sheet" class="bottom-sheet b3-result-sheet" hidden aria-modal="true" role="dialog" aria-labelledby="qr-result-title">
-    <div class="bottom-sheet-handle" aria-hidden="true"></div>
+<section id="b3-result-page" class="b3-result-page" hidden role="region" aria-labelledby="qr-result-title" tabindex="-1">
+
 
     <div class="b3-result-shell">
         <header class="b3-result-header">
             <div>
                 <div class="b3-result-eyebrow">B3 · THỰC HIỆN KẾ HOẠCH</div>
-                <h2 id="qr-result-title">KẾT QUẢ TÌM KIẾM</h2>
+                <h2 id="qr-result-title">THỰC HIỆN KẾ HOẠCH</h2>
             </div>
-            <button id="close-bottom-sheet-x" type="button" class="btn-close b3-result-close" aria-label="Đóng"></button>
+            <button id="b3-result-back" type="button" class="btn btn-outline-secondary b3-result-back">← Quay lại</button>
         </header>
 
         <div class="b3-result-scroll">
-            <section class="b3-context-card" aria-label="Thông tin kết quả quét">
+            <details class="b3-raw-qr b3-plan-details">
+                <summary>Phạm vi kế hoạch</summary>
+                <section class="b3-context-card" aria-label="Thông tin kết quả quét">
                 <div class="b3-context-grid">
                     <div>
-                        <span class="b3-field-label">Phạm vi kế hoạch</span>
+                        <span class="b3-field-label">Kế hoạch</span>
                         <div id="b3-plan-scope"></div>
                     </div>
                     <div>
@@ -214,7 +216,8 @@
                         <strong id="b3-reel-type"></strong>
                     </div>
                 </div>
-            </section>
+                </section>
+            </details>
 
             <div class="b3-operation-tabs" role="tablist" aria-label="Loại thao tác B3">
                 <button id="b3-tab-whole" class="b3-operation-tab" type="button" role="tab" data-b3-tab="whole">
@@ -234,7 +237,7 @@
         </div>
 
         <div class="b3-result-footer">
-            <label class="form-check b3-footer-continuous" for="b3-continue-scan">
+            <label id="b3-continue-scan-label" class="form-check b3-footer-continuous" for="b3-continue-scan">
                 <input id="b3-continue-scan" class="form-check-input" type="checkbox">
                 <span class="form-check-label">Quét liên tiếp sau khi lưu</span>
             </label>

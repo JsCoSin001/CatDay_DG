@@ -15,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->web(prepend: [\App\Http\Middleware\ScanDiagnostics::class]);
+        $middleware->appendToPriorityList(
+            \Illuminate\Session\Middleware\StartSession::class,
+            \App\Http\Middleware\ScanDiagnostics::class,
+        );
         $middleware->alias([
             'active.user' => \App\Http\Middleware\EnsureActiveUser::class,
             'b3.request-id' => \App\Http\Middleware\B3RequestId::class,
@@ -29,6 +34,19 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Laravel wraps TokenMismatchException as an HTTP 419 before render callbacks run.
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $e, Request $request) {
+            if ($e->getStatusCode() === 419 && ($request->is('api/b3/*') || $request->is('login', 'logout'))) {
+                $token = $request->session()->token();
+                return response()->json([
+                    'success' => false,
+                    'error_code' => 'CSRF_TOKEN_MISMATCH',
+                    'message' => 'Phiên bảo mật đã thay đổi. Vui lòng thử lại thao tác.',
+                    'csrf_token' => $token,
+                    'request_id' => $request->attributes->get('b3_request_id'),
+                ], 419)->header('X-CSRF-TOKEN', $token)->header('Cache-Control', 'no-store');
+            }
+        });
         $exceptions->render(function (B3Exception $e, Request $request) {
             if ($request->is('api/b3/*')) {
                 Log::warning('B3 business error', [
@@ -45,8 +63,8 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
         $exceptions->render(function (AuthenticationException $e, Request $request) {
-            if ($request->is('api/b3/*')) {
-                return response()->json(['success'=>false,'error_code'=>'AUTH_REQUIRED','message'=>'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.'], 401);
+            if ($request->is('api/b3/*') || ($request->is('logout') && $request->expectsJson())) {
+                return response()->json(['success'=>false,'error_code'=>'AUTH_REQUIRED','message'=>'Phiên đăng nhập đã hết. Vui lòng đăng nhập lại.','csrf_token'=>$request->session()->token()], 401)->header('Cache-Control', 'no-store');
             }
         });
         $exceptions->render(function (\Throwable $e, Request $request) {

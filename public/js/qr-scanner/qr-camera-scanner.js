@@ -7,9 +7,6 @@
     retrying: "Đang thử camera khác...",
     ready: "",
     stopped: "Đã đóng camera quét QR.",
-    torchOn: "Đã bật đèn hỗ trợ.",
-    torchOff: "Đã tắt đèn hỗ trợ.",
-    torchUnavailable: "Camera này không hỗ trợ bật đèn.",
     libraryMissing: "Chưa nạp thư viện html5-qrcode.",
     startFailed: "Không mở được camera quét QR. Hãy kiểm tra quyền Camera và HTTPS.",
     targetMissing: "Không tìm thấy vùng hiển thị camera.",
@@ -46,9 +43,9 @@
           : 1,
         adaptiveScan: opts.adaptiveScan !== false,
         adaptiveDelay: Number.isFinite(Number(opts.adaptiveDelay))
-          ? Math.max(0, Number(opts.adaptiveDelay)) : 2000,
+          ? Math.max(0, Number(opts.adaptiveDelay)) : 250,
         adaptiveInterval: Number.isFinite(Number(opts.adaptiveInterval))
-          ? Math.max(1000, Number(opts.adaptiveInterval)) : 1000,
+          ? Math.max(1000, Number(opts.adaptiveInterval)) : 300,
         emitEvents: opts.emitEvents !== false,
         eventTarget: opts.eventTarget || (typeof document !== "undefined" ? document : null),
         onResult: typeof opts.onResult === "function" ? opts.onResult : null,
@@ -62,11 +59,10 @@
       this.running = false;
       this.starting = false;
       this.resultBusy = false;
-      this.torchSupported = false;
-      this.torchEnabled = false;
       this.lastResults = new Map();
       this.sessionId = 0;
       this.pendingStart = null;
+      this.pendingResult = null;
       this.stopPromise = null;
       this.adaptiveTimer = null;
       this.adaptiveCanvas = null;
@@ -74,6 +70,7 @@
       this.resizeHandler = null;
       this.resizeTimer = null;
       this.scanViewportSize = null;
+      this.cameraQrBox = null;
       this.elementId = this.resolveElementId();
     }
 
@@ -105,8 +102,6 @@
         running: this.running,
         starting: this.starting,
         mode: this.options.mode,
-        torchSupported: this.torchSupported,
-        torchEnabled: this.torchEnabled,
         elementId: this.elementId,
       };
     }
@@ -136,20 +131,27 @@
 
       const session = ++this.sessionId;
       this.starting = true;
+      this.pendingResult = null;
       this.resultBusy = false;
       this.emitState();
       this.emitStatus("preparing", this.options.messages.preparing, "info");
       this.clearTarget();
+      this.cameraQrBox = null;
 
       const task = this.startCameraSession(session);
       this.pendingStart = task;
       try {
-        return await task;
+        await task;
       } finally {
         if (this.pendingStart === task) {
           this.pendingStart = null;
         }
       }
+      // Startup must settle before a single result can stop/release the camera.
+      const result = this.pendingResult;
+      this.pendingResult = null;
+      if (result) await this.handleDecodedResult(result.text, result.result, result.session);
+      return this.getState();
     }
 
     async startCameraSession(session) {
@@ -163,31 +165,65 @@
         instance = new global.Html5Qrcode(this.elementId, constructorConfig);
         this.html5QrCode = instance;
         const qrbox = (width, height) => {
+          let visibleSide = Math.min(width, height);
+          const target = typeof document !== "undefined" ? document.getElementById(this.elementId) : null;
+          if (target?.classList?.contains("qr-lib-region") && target.clientWidth && target.clientHeight && width && height) {
+            // Cover the modal viewport by scaling the video and vendor guide
+            // together, without changing the camera track or native crop math.
+            const scale = Math.max(target.clientWidth / width, target.clientHeight / height);
+            target.style.setProperty("--qr-preview-scale", String(scale));
+            target.style.setProperty("--qr-preview-width", `${width}px`);
+            target.style.setProperty("--qr-preview-height", `${height}px`);
+            visibleSide = Math.min(target.clientWidth, target.clientHeight) / scale;
+          }
           // Same actual crop for the primary camera AND every fallback.
           const side = Math.max(50, Math.floor(
-            Math.min(width, height) * this.options.qrboxRatio,
+            visibleSide * this.options.qrboxRatio,
           ));
+          this.cameraQrBox = { width, height, side };
           return { width: side, height: side };
         };
         const primaryConfig = {
           fps: this.options.fps,
           qrbox,
-          disableFlip: false,
+          disableFlip: true,
           aspectRatio: this.options.aspectRatio,
         };
         const relaxedConfig = {
           fps: Math.min(this.options.fps, 12),
           qrbox,
-          disableFlip: false,
+          disableFlip: true,
         };
         const onSuccess = (text, result) => {
+          if (this.sessionId !== session) return;
+          if (this.starting || this.pendingStart) {
+            if (String(text == null ? "" : text).trim() && !this.pendingResult) {
+              this.pendingResult = { text, result, session };
+            }
+            return;
+          }
           void this.handleDecodedResult(text, result, session);
         };
         const tryStart = async (camera, config) => {
           if (this.sessionId !== session) {
             throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
           }
-          await instance.start(camera, config, onSuccess, function () {});
+          // Verified in the local 2.3.8 start(): videoConstraints replaces
+          // cameraIdOrConfig. Include camera identity so it cannot select the front camera.
+          const identity = typeof camera === "string" ? { deviceId: { exact: camera } } : camera;
+          const highResolutionConfig = Object.assign({}, config, {
+            videoConstraints: Object.assign({}, identity, {
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            }),
+          });
+          try {
+            await instance.start(camera, highResolutionConfig, onSuccess, function () {});
+          } catch (resolutionError) {
+            if (this.sessionId !== session || cameraPermissionDenied(resolutionError)) throw resolutionError;
+            // Retry the original working profile before advancing the existing fallback chain.
+            await instance.start(camera, config, onSuccess, function () {});
+          }
           if (this.sessionId !== session) {
             throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
           }
@@ -229,8 +265,6 @@
           await this.optimizeActiveCameraTrack();
         } catch (_) {
           // Failure to query or tune camera capabilities must not prevent scanning.
-          this.torchSupported = false;
-          this.torchEnabled = false;
         }
         if (this.sessionId !== session) {
           throw this.createError("SCAN_CANCELLED", "Camera đã đóng.");
@@ -279,12 +313,11 @@
       const emitStatus = opts.emitStatus !== false;
       // Invalidate both the scanning callbacks and delayed image processing immediately.
       ++this.sessionId;
+      this.pendingResult = null;
       this.clearAdaptiveScanning();
       this.clearViewportResize();
       this.running = false;
       this.starting = false;
-      this.torchSupported = false;
-      this.torchEnabled = false;
       this.emitState();
       if (this.stopPromise) {
         await this.stopPromise;
@@ -318,46 +351,13 @@
       this.lastResults.clear();
     }
 
-    async toggleTorch(forceValue) {
-      if (
-        !this.running ||
-        !this.html5QrCode ||
-        !this.torchSupported ||
-        typeof this.html5QrCode.applyVideoConstraints !== "function"
-      ) {
-        const error = this.createError("TORCH_UNAVAILABLE", this.options.messages.torchUnavailable);
-        this.emitError(error);
-        throw error;
-      }
-
-      const nextValue = typeof forceValue === "boolean" ? forceValue : !this.torchEnabled;
-
-      try {
-        await this.html5QrCode.applyVideoConstraints({
-          advanced: [{ torch: nextValue }],
-        });
-        this.torchEnabled = nextValue;
-        this.emitState();
-        this.emitStatus(
-          nextValue ? "torch-on" : "torch-off",
-          nextValue ? this.options.messages.torchOn : this.options.messages.torchOff,
-          "info",
-        );
-        return this.torchEnabled;
-      } catch (cause) {
-        const error = this.createError("TORCH_UNAVAILABLE", this.options.messages.torchUnavailable, cause);
-        this.emitError(error);
-        throw error;
-      }
-    }
-
     async optimizeActiveCameraTrack() {
       if (
+        !this.options.optimizeCamera ||
         !this.running ||
         !this.html5QrCode ||
         typeof this.html5QrCode.applyVideoConstraints !== "function"
       ) {
-        this.emitState();
         return;
       }
 
@@ -366,14 +366,6 @@
         ? instance.getRunningTrackCapabilities() : null;
       const settings = typeof instance.getRunningTrackSettings === "function"
         ? instance.getRunningTrackSettings() : null;
-
-      this.torchSupported = Boolean(capabilities && capabilities.torch);
-      this.torchEnabled = Boolean(settings && settings.torch);
-      this.emitState();
-
-      if (!this.options.optimizeCamera) {
-        return;
-      }
 
       // Apply only verified capabilities; never request autofocus and single-shot
       // together, and never increase zoom automatically (decision 3A).
@@ -389,8 +381,7 @@
         advanced.exposureMode = "continuous";
       }
       if (this.sessionId > 0 && this.running) {
-        // Resolution is best-effort: ask for a supported setting, then read
-        // getRunningTrackSettings() instead of assuming that it was accepted.
+        // Resolution is best-effort and constrained to supported dimensions.
         const constraints = {};
         if (capabilities && capabilities.width && capabilities.height && settings) {
           const maxWidth = Number(capabilities.width.max);
@@ -421,12 +412,6 @@
           }
         }
       }
-
-      if (this.html5QrCode !== instance || !this.running) return;
-      const refreshedSettings = typeof instance.getRunningTrackSettings === "function"
-        ? instance.getRunningTrackSettings() : null;
-      this.torchEnabled = Boolean(refreshedSettings && refreshedSettings.torch);
-      this.emitState();
     }
 
     async handleDecodedResult(decodedText, decodedResult, session) {
@@ -498,8 +483,8 @@
         if (this.sessionId !== session || !this.running) return;
         const box = document.getElementById(this.elementId);
         if (!box || !this.scanViewportSize) return;
-        if (Math.abs(box.clientWidth - this.scanViewportSize.width) < 12
-          && Math.abs(box.clientHeight - this.scanViewportSize.height) < 12) return;
+        if (Math.abs(box.clientWidth - this.scanViewportSize.width) < 1
+          && Math.abs(box.clientHeight - this.scanViewportSize.height) < 1) return;
         if (this.resizeTimer !== null) clearTimeout(this.resizeTimer);
         this.resizeTimer = setTimeout(async () => {
           this.resizeTimer = null;
@@ -511,6 +496,7 @@
         }, 400);
       };
       global.addEventListener("resize", this.resizeHandler);
+      global.visualViewport?.addEventListener("resize", this.resizeHandler);
     }
 
     clearViewportResize() {
@@ -520,6 +506,7 @@
       }
       if (this.resizeHandler && typeof global.removeEventListener === "function") {
         global.removeEventListener("resize", this.resizeHandler);
+        global.visualViewport?.removeEventListener("resize", this.resizeHandler);
       }
       this.resizeHandler = null;
       this.scanViewportSize = null;
@@ -536,6 +523,9 @@
         this.adaptiveTimer = setTimeout(() => {
           this.adaptiveTimer = null;
           if (session !== this.sessionId || !this.running || this.resultBusy) return;
+          const now = () => global.performance && typeof global.performance.now === "function"
+            ? global.performance.now() : Date.now();
+          const started = now();
           try {
             const imageData = this.captureVisibleQrBox();
             const text = imageData && this.adaptiveDecoder.decodeCameraFrame(imageData);
@@ -547,7 +537,10 @@
             // The standard html5-qrcode decoder remains active and uninterrupted.
           } finally {
             if (session === this.sessionId && this.running && !this.resultBusy) {
-              schedule(this.options.adaptiveInterval);
+              const elapsed = Math.max(0, now() - started);
+              schedule(elapsed > 80
+                ? Math.max(this.options.adaptiveInterval, Math.ceil(elapsed * 4))
+                : this.options.adaptiveInterval);
             }
           }
         }, delay);
@@ -573,23 +566,39 @@
       const shade = target.querySelector("#qr-shaded-region");
       if (!video || !shade || video.readyState < 2 || !video.videoWidth || !video.videoHeight
         || typeof global.getComputedStyle !== "function") return null;
+      // Vendor start() can resolve before the guide is inserted. Align again
+      // once it exists, including rectangular high-resolution/fallback streams.
+      this.alignScanOverlay();
       const videoRect = video.getBoundingClientRect();
       const shadeRect = shade.getBoundingClientRect();
       const style = global.getComputedStyle(shade);
-      const left = shadeRect.left + (parseFloat(style.borderLeftWidth) || 0);
-      const right = shadeRect.right - (parseFloat(style.borderRightWidth) || 0);
-      const top = shadeRect.top + (parseFloat(style.borderTopWidth) || 0);
-      const bottom = shadeRect.bottom - (parseFloat(style.borderBottomWidth) || 0);
+      const shadeWidth = style.boxSizing === "border-box" ? parseFloat(style.width) : shade.offsetWidth;
+      const shadeHeight = style.boxSizing === "border-box" ? parseFloat(style.height) : shade.offsetHeight;
+      const scaleX = shadeWidth ? shadeRect.width / shadeWidth : 1;
+      const scaleY = shadeHeight ? shadeRect.height / shadeHeight : 1;
+      const left = shadeRect.left + (parseFloat(style.borderLeftWidth) || 0) * scaleX;
+      const right = shadeRect.right - (parseFloat(style.borderRightWidth) || 0) * scaleX;
+      const top = shadeRect.top + (parseFloat(style.borderTopWidth) || 0) * scaleY;
+      const bottom = shadeRect.bottom - (parseFloat(style.borderBottomWidth) || 0) * scaleY;
       const size = Math.min(right - left, bottom - top);
       if (size < 50 || videoRect.width <= 0 || videoRect.height <= 0) return null;
       // Do not scan outside the guide, even when CSS/layout change unexpectedly.
       if (left < videoRect.left - 1 || top < videoRect.top - 1
         || right > videoRect.right + 1 || bottom > videoRect.bottom + 1) return null;
 
-      const x = (left - videoRect.left) / videoRect.width * video.videoWidth;
-      const y = (top - videoRect.top) / videoRect.height * video.videoHeight;
-      const width = (right - left) / videoRect.width * video.videoWidth;
-      const height = (bottom - top) / videoRect.height * video.videoHeight;
+      const box = this.cameraQrBox;
+      // CSS borders round fractional pixels. Reuse the exact centered qrbox
+      // supplied to the vendor when its video layout still matches.
+      const matchingBox = box && box.width === video.clientWidth && box.height === video.clientHeight;
+      if (box && !matchingBox) return null; // Wait for resize to rebuild the native crop too.
+      const x = matchingBox ? (box.width - box.side) / 2 / box.width * video.videoWidth
+        : (left - videoRect.left) / videoRect.width * video.videoWidth;
+      const y = matchingBox ? (box.height - box.side) / 2 / box.height * video.videoHeight
+        : (top - videoRect.top) / videoRect.height * video.videoHeight;
+      const width = matchingBox ? box.side / box.width * video.videoWidth
+        : (right - left) / videoRect.width * video.videoWidth;
+      const height = matchingBox ? box.side / box.height * video.videoHeight
+        : (bottom - top) / videoRect.height * video.videoHeight;
       if (x < 0 || y < 0 || x + width > video.videoWidth + 2
         || y + height > video.videoHeight + 2) return null;
       const outputSide = Math.max(1, Math.min(640, Math.round(Math.min(width, height))));

@@ -17,7 +17,7 @@ class ScanResolveApiTest extends TestCase
         DB::table('TTThanhPham')->insert(['id'=>10,'DanhSachSP_ID'=>1,'MaBin'=>'MB001','NhapKho'=>1,'Temp'=>0]);
         DB::table('TTNhapKhoTP')->insert(['id'=>20,'TTThanhPham_ID'=>10,'TenSP'=>'SP A','TongChieuDai'=>200,'GhiChu'=>'','NguoiLam'=>'u','NgayNhapKho'=>'2026-01-01','DateInsert'=>'2026-01-01']);
         DB::table('TTCuonDay')->insert(['id'=>30,'SoCuon'=>2,'ChieuDai_1cuon'=>100,'SoDau'=>null,'SoCuoi'=>null,'ThongTinNhapKho_ID'=>20,'Ngay'=>'2026-01-01','DateInsert'=>'2026-01-01']);
-        DB::table('KeHoach')->insert(['id'=>1,'MaKeHoach'=>'KH1','NgayKeHoach'=>'2026-10-01','TrangThai'=>'ACTIVE']);
+        DB::table('KeHoach')->insert(['id'=>1,'Users_id' => 1, 'MaKeHoach' =>'KH1','NgayKeHoach'=>'2026-10-01','TrangThai'=>'ACTIVE']);
         DB::table('KeHoachHang')->insert(['id'=>40,'KeHoach_ID'=>1,'DanhSachMaSP_ID'=>1,'SoLuongCuonCanLay'=>1,'ChieuDai1Cuon_KeHoach'=>100]);
     }
     private function user(): User { return User::query()->findOrFail(1); }

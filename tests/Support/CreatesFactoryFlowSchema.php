@@ -29,21 +29,33 @@ trait CreatesFactoryFlowSchema
         });
         Schema::create('KeHoach', function (Blueprint $t) {
             $t->increments('id'); $t->string('MaKeHoach')->unique(); $t->string('NgayKeHoach'); $t->string('NguoiNhan')->nullable(); $t->string('TrangThai')->default('ACTIVE'); $t->string('GhiChu')->nullable(); $t->string('NguoiTao')->nullable();
+            $t->unsignedInteger('Users_id')->nullable();
         });
         Schema::create('KeHoachHang', function (Blueprint $t) {
             $t->increments('id'); $t->unsignedInteger('KeHoach_ID'); $t->unsignedInteger('DanhSachMaSP_ID'); $t->integer('SoLuongCuonCanLay')->default(0); $t->integer('ChieuDai1Cuon_KeHoach')->nullable(); $t->unique(['KeHoach_ID','DanhSachMaSP_ID']);
+        });
+        Schema::create('KeHoachHangQuyCachCuonChan', function (Blueprint $t) {
+            $t->increments('id'); $t->unsignedInteger('KeHoachHang_ID');
+            $t->integer('ChieuDai1Cuon'); $t->integer('SoLuongCuonCanLay')->default(0);
+            $t->unique(['KeHoachHang_ID','ChieuDai1Cuon']);
         });
         Schema::create('TonCuonLe', function (Blueprint $t) {
             $t->increments('id'); $t->string('MaCuon')->unique(); $t->unsignedInteger('TTThanhPham_ID'); $t->unsignedInteger('TTCuonDay_ID'); $t->integer('SoDau'); $t->integer('SoCuoi'); $t->string('TrangThai')->default('ACTIVE'); $t->string('GhiChu')->nullable();
         });
         Schema::create('KeHoachCatNhom', function (Blueprint $t) {
-            $t->increments('id'); $t->unsignedInteger('KeHoachHang_ID'); $t->unsignedInteger('TonCuonLe_ID')->nullable(); $t->string('GhiChu')->nullable();
+            $t->increments('id'); $t->unsignedInteger('KeHoachHang_ID'); $t->unsignedInteger('TonCuonLe_ID')->nullable(); $t->unsignedInteger('QuyCachCuonChan_ID')->nullable(); $t->string('GhiChu')->nullable();
         });
         Schema::create('KeHoachCatChiTiet', function (Blueprint $t) {
             $t->increments('id'); $t->unsignedInteger('KeHoachCatNhom_ID'); $t->integer('ChieuDaiCanCat'); $t->string('GhiChu')->nullable();
         });
         Schema::create('LichSuLayCuon', function (Blueprint $t) {
-            $t->increments('id'); $t->unsignedInteger('KeHoachHang_ID'); $t->unsignedInteger('TTCuonDay_ID'); $t->integer('SoLuong'); $t->string('NguoiThucHien'); $t->string('GhiChu')->nullable();
+            $t->increments('id'); $t->unsignedInteger('KeHoachHang_ID'); $t->unsignedInteger('TTCuonDay_ID'); $t->unsignedInteger('QuyCachCuonChan_ID')->nullable(); $t->integer('SoLuong'); $t->string('NguoiThucHien'); $t->string('GhiChu')->nullable();
+        });
+        Schema::create('B3QrSuDung', function (Blueprint $t) {
+            $t->string('RawQr')->primary(); $t->string('TrangThai');
+            $t->unsignedInteger('LichSuLayCuon_ID')->nullable();
+            $t->unsignedInteger('TonCuonLe_ID')->nullable();
+            $t->string('NguoiThucHien'); $t->timestamp('ThoiGian')->useCurrent();
         });
         Schema::create('LichSuCat', function (Blueprint $t) {
             $t->increments('id'); $t->unsignedInteger('KeHoachCatChiTiet_ID')->unique(); $t->unsignedInteger('TonCuonLe_ID'); $t->string('LoaiNguon'); $t->integer('ChieuDaiCat');
