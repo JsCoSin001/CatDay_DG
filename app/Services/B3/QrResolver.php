@@ -17,7 +17,7 @@ class QrResolver
             if(strcasecmp(trim($parts[0]),'cuontp')!==0
                 || trim($parts[1]??'')==='' || !preg_match('/^[1-9][0-9]*$/D',trim($parts[2]??''))
                 || (int)trim($parts[2])>2147483647) {
-                throw B3Exception::make('QR_INVALID_FORMAT','Mã QR cuộn chẵn phải có tiền tố cuontp, mã MaBin và chiều dài nguyên dương.');
+                throw B3Exception::make('QR_INVALID_FORMAT','Mã QR không đúng định dạng.');
             }
             return ['kind'=>'STRUCTURED','raw'=>$raw,'ma_bin'=>trim($parts[1]),
                 'chieu_dai_1cuon'=>(int)trim($parts[2])];
@@ -52,7 +52,7 @@ class QrResolver
         $parsed=$this->parse($raw);
         // A whole-taken QR must never be accepted again, even if stock is still positive.
         if(\Illuminate\Support\Facades\DB::table('B3QrSuDung')->where('RawQr',$raw)->where('TrangThai','DA_LAY_NGUYEN')->exists())
-            throw B3Exception::make('QR_ALREADY_USED','Mã QR này đã được lấy nguyên trước đó.',409);
+            throw B3Exception::make('QR_ALREADY_USED','Cuộn này đã được lấy. Hãy chọn cuộn khác.',409);
         if(\Illuminate\Support\Facades\DB::table('B3QrSuDung')->where('RawQr',$raw)->where('TrangThai','DA_CHUYEN_LE')->exists())
             throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này đã chuyển lẻ và không còn khả dụng.',409);
         if($parsed['kind']==='PLAIN'){

@@ -119,7 +119,7 @@ for(const mode of [{partial:false,reverse:false},{partial:true,reverse:false},{p
       assert.equal(new Set(payloads.map(p=>p.operation_token)).size,3);
       assert.deepEqual(payloads.map(p=>p.source_version),['revision-0','revision-1','revision-2']);
       assert.equal(payloads[1].end_value,undefined,'continuation uses backend markers without another rebase');
-      assert.match(await page.locator('#b3-save-action').textContent(),/LƯU LẦN CẮT TIẾP/i);
+      assert.match(await page.locator('#b3-save-action').textContent(),/LƯU và TIẾP/i);
       await page.locator('#b3-cancel-action').click();
       assert.equal(await page.locator('#b3-result-page').isVisible(),false);
       assert.equal(await page.evaluate(()=>window.B3State.cutSession),null);
@@ -236,6 +236,46 @@ test('an uncertain cut cannot escape to another matching plan or discard its tok
   }finally{await browser.close();}
 });
 
+for(const scenario of [{count:2,selected:false},{count:2,selected:true},{count:1,selected:false}]){
+  test(`plan scope stays expanded whenever a plan selector is needed ${JSON.stringify(scenario)}`,{skip:!chromium,timeout:15000},async()=>{
+    const browser=await chromium.launch({headless:true});
+    try{
+      const {page,errors}=await harness(browser,{width:390,height:844});
+      await page.evaluate(async({count,selected})=>{
+        window.__context.available_actions=['TAKE_WHOLE_REEL'];
+        window.__scopeContexts=Array.from({length:count},(_,i)=>({...window.__context,plan:{id:7+i,ma_ke_hoach:'KH-CHOICE-'+i}}));
+        window.B3Api.resolveQr=async()=>({source:window.__source,operation_token:'choice-token',selected_context:selected?window.__scopeContexts[0]:null,candidate_contexts:window.__scopeContexts});
+        await window.__b3.resolveScan('BIN-007-QR');
+      },scenario);
+      const details=page.locator('.b3-plan-details'),summary=details.locator('summary');
+      assert.equal(await details.evaluate(n=>n.open),true,'required plan choice is immediately expanded');
+      assert.equal(await page.locator('#b3-plan-select').isVisible(),true);
+      if(!scenario.selected){
+        const warning=page.locator('#b3-tab-content .alert.alert-danger');
+        assert.equal(await warning.textContent(),'Vui lòng chọn phạm vi kế hoạch để tiếp tục.');
+        assert.equal(await warning.getAttribute('role'),'alert');
+        assert.equal(await page.locator('#b3-save-action').isDisabled(),true);
+      }
+      await summary.click();assert.equal(await details.evaluate(n=>n.open),true,'mouse cannot conceal a required selector');
+      await summary.focus();await page.keyboard.press('Enter');assert.equal(await details.evaluate(n=>n.open),true,'keyboard cannot conceal a required selector');
+      const choice=String(scenario.count-1);await page.locator('#b3-plan-select').selectOption(choice);
+      assert.equal(await page.evaluate(()=>window.B3State.context.plan.id),7+Number(choice));
+      assert.equal(await page.locator('#b3-save-action').isDisabled(),false);
+      assert.equal(await page.locator('#b3-tab-content .alert-danger').count(),0,'warning disappears after selection');
+      assert.equal(await details.evaluate(n=>n.open),scenario.count>1,'multiple matching plans remain expanded; a resolved single choice may collapse');
+      await page.locator('#b3-cancel-action').click();await page.waitForFunction(()=>!window.history.state?.b3ResultPage);
+      await page.evaluate(async()=>{
+        window.B3Api.resolveQr=async()=>({source:window.__source,selected_context:window.__context,candidate_contexts:[window.__context],operation_token:'single-token'});
+        await window.__b3.resolveScan('BIN-007-QR');
+      });
+      assert.equal(await details.evaluate(n=>n.open),false,'a later scan without a choice starts collapsed');
+      await summary.click();assert.equal(await details.evaluate(n=>n.open),true,'single-plan information can still be opened manually');
+      await summary.click();assert.equal(await details.evaluate(n=>n.open),false,'single-plan information can still be collapsed manually');
+      assert.deepEqual(errors,[]);
+    }finally{await browser.close();}
+  });
+}
+
 test('mixed whole and cut actions require a choice before opening cut confirmation',{skip:!chromium,timeout:15000},async()=>{
   const browser=await chromium.launch({headless:true});
   try{
@@ -243,7 +283,11 @@ test('mixed whole and cut actions require a choice before opening cut confirmati
     await page.evaluate(async()=>{window.__context.available_actions=['TAKE_WHOLE_REEL','CUT_FULL_REEL'];await window.__b3.resolveScan('BIN-007-QR');});
     assert.equal(await page.locator('#b3-tab-whole').isVisible(),true);assert.equal(await page.locator('#b3-tab-cut').isVisible(),true);
     assert.equal(await page.locator('#b3-cut-settings-dialog').count(),0);assert.equal(await page.locator('#b3-save-action').isDisabled(),true);
+    const warning=page.locator('#b3-tab-content .alert.alert-warning');
+    assert.equal(await warning.textContent(),'Cần chọn LẤY NGUYÊN CUỘN hoặc CHỌN CẮT LẺ trước');
+    assert.equal(await warning.getAttribute('role'),'alert');
     await page.locator('#b3-tab-whole').click();assert.equal(await page.locator('#b3-save-action').isDisabled(),false);
+    assert.equal(await page.locator('#b3-tab-content .alert-warning').count(),0,'operation warning disappears after choosing');
     assert.equal(await page.evaluate(()=>window.B3State.cutSession),null);
     await page.locator('#b3-tab-cut').click();await page.locator('#b3-cut-settings-dialog').waitFor({state:'visible'});
     await page.locator('#b3-end-value-input').fill('1000');await page.locator('#b3-direction-select').selectOption('1');await page.locator('#b3-cut-settings-confirm').click();
@@ -501,6 +545,132 @@ test('worklist badges and order refresh only after Save succeeds',{skip:!chromiu
     assert.deepEqual(await ids(),['other','waiting','running','done']);
     assert.equal(await page.locator('#plan-table-body .b3-status-done').first().textContent(),'Đã thực hiện (2/2)');
     assert.equal(await page.locator('#plan-table-body tr').first().locator('td').count(),9);
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});
+
+
+test('QR result disclosure headers, warning and live reel markers match the selected direction',{skip:!chromium,timeout:20000},async()=>{
+  const browser=await chromium.launch({headless:true});
+  try{
+    const {page,errors}=await harness(browser,{width:390,height:844});
+    await page.evaluate(()=>{window.__context.available_actions=['TAKE_WHOLE_REEL','CUT_FULL_REEL'];window.__source.chieu_dai_1cuon=300;});
+    await page.evaluate(()=>window.__b3.resolveScan('BIN-007-QR'));
+    const warning=page.locator('#b3-tab-content .alert-warning');
+    assert.equal(await warning.textContent(),'Cần chọn LẤY NGUYÊN CUỘN hoặc CHỌN CẮT LẺ trước');
+    for(const selector of ['.b3-plan-details','.b3-result-scroll > .b3-raw-qr:last-child']){
+      const disclosure=page.locator(selector),icon=disclosure.locator('summary .b3-disclosure-icon');
+      assert.equal(await icon.count(),1);
+      assert.equal(await disclosure.evaluate(n=>n.open),false);
+      const closed=await icon.evaluate(n=>getComputedStyle(n).transform);
+      await disclosure.locator('summary').click();
+      await page.waitForTimeout(250);
+      assert.notEqual(await icon.evaluate(n=>getComputedStyle(n).transform),closed);
+      await disclosure.locator('summary').click();
+    }
+    await page.locator('#b3-tab-cut').click();
+    await page.locator('#b3-end-value-input').fill('500');
+    await page.locator('#b3-direction-select').selectOption('1');
+    const preview=page.locator('#b3-cut-settings-preview');
+    assert.equal(await preview.textContent(),'Số đầu - Số cuối: 200 - 500');
+    await screenshot(page,'b3-reel-direction-preview.png');
+    await page.locator('#b3-direction-select').selectOption('-1');
+    assert.equal(await preview.textContent(),'Số đầu - Số cuối: 800 - 500');
+    await page.locator('#b3-direction-select').selectOption('1');
+    await page.locator('#b3-end-value-input').fill('200');
+    const error=page.locator('#b3-cut-settings-error');
+    assert.equal(await error.isVisible(),true);
+    assert.match(await error.textContent(),/Số đầu.*0/);
+    await page.locator('#b3-cut-settings-confirm').click();
+    assert.equal(await page.locator('#b3-cut-settings-dialog').isVisible(),true);
+    await page.locator('#b3-end-value-input').fill('500');
+    assert.equal(await error.isVisible(),false);
+    await page.locator('#b3-cut-settings-confirm').click();
+    const reel=page.locator('.b3-reel-details');
+    assert.equal(await reel.locator('summary').textContent(),'Thông tin cuộn/lô lẻ');
+    assert.equal(await reel.evaluate(n=>n.open),false,'reel information is collapsed after confirming end and direction');
+    await reel.locator('summary').click();assert.equal(await page.locator('#b3-current-end').isVisible(),true);
+    await reel.locator('summary').click();assert.equal(await page.locator('#b3-current-end').isVisible(),false);
+    await page.locator('#b3-cut-detail-select').selectOption('101');
+    assert.equal(await reel.evaluate(n=>n.open),false,'changing cut length preserves collapsed reel information');
+    await reel.locator('summary').click();assert.equal(await page.locator('#b3-current-end').textContent(),'500');
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});
+
+test('partial reel information has an expandable header and group guidance uses danger styling',{skip:!chromium,timeout:15000},async()=>{
+  const browser=await chromium.launch({headless:true});
+  try{
+    const {page,errors}=await harness(browser,{width:1366,height:900});
+    await page.evaluate(()=>{
+      window.__source={source_type:'CUON_LE',raw_qr:'PARTIAL-007',partial:{id:91,SoDau:0,SoCuoi:411}};
+      window.__context.available_actions=['CUT_PARTIAL_REEL'];
+      window.__context.groups.push({id:20,details:[{id:200,ChieuDaiCanCat:200,done:0,selectable:true}]});
+    });
+    await scan(page);await page.locator('#b3-cut-settings-confirm').click();
+    assert.equal(await page.locator('.b3-reel-details summary').textContent(),'Thông tin cuộn/lô lẻ');
+    assert.equal(await page.locator('#b3-current-start').textContent(),'0');
+    assert.equal(await page.locator('#b3-current-end').textContent(),'411');
+    const note=page.locator('#b3-tab-content .b3-inline-note');
+    assert.equal(await note.textContent(),'Chọn chiều dài cần cắt trong nhóm.');
+    assert.equal(await note.evaluate(n=>n.classList.contains('text-danger')),true);
+    await page.locator('#b3-group-select').selectOption('19');
+    assert.equal(await page.locator('.b3-reel-details').evaluate(n=>n.open),false,'partial reel information defaults to collapsed');
+    await page.locator('.b3-reel-details summary').click();
+    assert.equal(await page.locator('#b3-current-end').isVisible(),true);
+    assert.deepEqual(errors,[]);
+  }finally{await browser.close();}
+});
+
+
+for(const viewport of [{width:390,height:667},{width:844,height:390},{width:1366,height:900}]){
+  test(`cut footer fits buttons and chosen cut preview is above footer ${viewport.width}x${viewport.height}`,{skip:!chromium,timeout:15000},async()=>{
+    const browser=await chromium.launch({headless:true});
+    try{
+      const {page,errors}=await harness(browser,viewport);
+      await scan(page);await accept(page);
+      const footer=await page.locator('.b3-result-footer').boundingBox();
+      const button=await page.locator('#b3-save-action').boundingBox();
+      assert.ok(footer.height<=button.height+17,'cut footer has at most 8px padding on each side plus border');
+      const scroll=await page.locator('.b3-result-scroll').boundingBox();
+      assert.ok(scroll.y+scroll.height<=footer.y+1,'main content ends above footer');
+      await page.evaluate(()=>{document.querySelector('.b3-result-scroll').scrollTop=0;});
+      await page.locator('#b3-cut-detail-select').selectOption('101');
+      const panel=await page.locator('#b3-tab-content .b3-operation-panel').boundingBox();
+      const preview=await page.locator('.b3-after-cut-card').boundingBox();
+      assert.ok(preview.y>=scroll.y-1&&preview.y+preview.height<=footer.y+1,'entire after-cut preview is visible above the buttons');
+      if(viewport.height>=667)closeTo(panel.y,scroll.y+10,'cut panel aligns immediately below screen header');
+      assert.equal(await page.locator('#b3-after-cut-value').textContent(),'290');
+      await screenshot(page,`b3-cut-layout-${viewport.width}x${viewport.height}.png`);
+      assert.deepEqual(errors,[]);
+    }finally{await browser.close();}
+  });
+}
+
+
+test('action buttons stay at the screen bottom after keyboard viewport height becomes stale',{skip:!chromium,timeout:15000},async()=>{
+  const browser=await chromium.launch({headless:true});
+  try{
+    const {page,errors}=await harness(browser,{width:390,height:844});
+    await scan(page);await accept(page);
+    // Mobile browsers can briefly keep the old keyboard viewport height after
+    // closing the number input. The result screen must follow CSS dynamic vh.
+    await page.evaluate(()=>{
+      Object.defineProperty(window.visualViewport,'height',{configurable:true,value:window.innerHeight-110});
+      window.visualViewport.dispatchEvent(new Event('resize'));
+    });
+    const footer=await page.locator('.b3-result-footer').boundingBox();
+    const button=await page.locator('#b3-save-action').boundingBox();
+    closeTo(footer.y+footer.height,844,'footer reaches the visible screen bottom');
+    assert.ok(844-(button.y+button.height)<=8,'no empty region beneath the action buttons');
+    await page.evaluate(()=>{
+      delete window.visualViewport.height;
+      window.visualViewport.dispatchEvent(new Event('resize'));
+    });
+    await page.setViewportSize({width:390,height:667});
+    const resized=await page.locator('.b3-result-footer').boundingBox();
+    closeTo(resized.y+resized.height,667,'footer follows screen resizing');
+    await screenshot(page,'b3-footer-bottom-mobile.png');
     assert.deepEqual(errors,[]);
   }finally{await browser.close();}
 });

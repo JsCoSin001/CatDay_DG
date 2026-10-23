@@ -146,13 +146,13 @@
                         <tr>
                             <th>Mã kế hoạch</th>
                             <th>Tên sản phẩm</th>
+                            <th>LOT</th>
                             <th>Tình trạng</th>
                             <th class="text-end">Chiều dài lấy</th>
                             <th class="text-end">Số lượng cuộn</th>
                             <th class="text-end">Số cuộn cắt lẻ</th>
                             <th class="text-end">Số đầu</th>
                             <th class="text-end">Số cuối</th>
-                            <th>LOT</th>
                         </tr>
                     </thead>
                     <tbody id="plan-table-body"></tbody>
@@ -196,7 +196,7 @@
 
         <div class="b3-result-scroll">
             <details class="b3-raw-qr b3-plan-details">
-                <summary>Phạm vi kế hoạch</summary>
+                <summary><span>Phạm vi kế hoạch</span><svg class="b3-disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
                 <section class="b3-context-card" aria-label="Thông tin kết quả quét">
                 <div class="b3-context-grid">
                     <div>
@@ -231,7 +231,7 @@
             <div id="b3-tab-content" class="b3-tab-content"></div>
 
             <details class="b3-raw-qr">
-                <summary>Mã QR đã quét</summary>
+                <summary><span>Mã QR đã quét</span><svg class="b3-disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
                 <div id="qr-result-value" class="qr-result-value"></div>
             </details>
         </div>

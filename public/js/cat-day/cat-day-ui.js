@@ -282,7 +282,7 @@ async function loadWorklist(){
     finally{if(version===worklistRequestVersion){state.worklistLoading=false;updateQrControls();}}
     },'worklist');
 }
-function renderTable(){const body=$('#plan-table-body'),empty=$('#empty-state'),pag=$('#pagination');if(!body)return;const total=state.worklist.length,pages=Math.max(1,Math.ceil(total/PAGE_SIZE));state.page=Math.min(state.page,pages);const rows=state.worklist.slice((state.page-1)*PAGE_SIZE,state.page*PAGE_SIZE);body.innerHTML=rows.map(r=>`<tr><td>${esc(r.ma_ke_hoach)}</td><td>${esc(r.ten_san_pham)}</td><td>${statusBadge(r)}</td><td class="text-end">${esc(fmt(r.chieu_dai_lay))}</td><td class="text-end">${esc(fmt(r.so_luong_cuon))}</td><td class="text-end">${esc(fmt(r.so_cuon_cat_le))}</td><td class="text-end">${esc(fmt(r.so_dau))}</td><td class="text-end">${esc(fmt(r.so_cuoi))}</td><td>${esc(fmt(r.lot))}</td></tr>`).join('');if(empty){empty.hidden=total>0;empty.querySelector('span').textContent='Chọn mã kế hoạch hoặc nhấn Tìm toàn bộ kế hoạch để xem công việc còn lại.';}if(pag)pag.hidden=total<=PAGE_SIZE;$('#result-summary').textContent=state.showAll?(total?`Đang xem toàn bộ kế hoạch · ${total} dòng công việc`:'Đang xem toàn bộ kế hoạch · Chưa có dữ liệu.'):(total?`${total} dòng công việc`:'Chưa có dữ liệu kế hoạch.');renderPagination(pages);}
+function renderTable(){const body=$('#plan-table-body'),empty=$('#empty-state'),pag=$('#pagination');if(!body)return;const total=state.worklist.length,pages=Math.max(1,Math.ceil(total/PAGE_SIZE));state.page=Math.min(state.page,pages);const rows=state.worklist.slice((state.page-1)*PAGE_SIZE,state.page*PAGE_SIZE);body.innerHTML=rows.map(r=>`<tr><td>${esc(r.ma_ke_hoach)}</td><td>${esc(r.ten_san_pham)}</td><td>${esc(fmt(r.lot))}</td><td>${statusBadge(r)}</td><td class="text-end">${esc(fmt(r.chieu_dai_lay))}</td><td class="text-end">${esc(fmt(r.so_luong_cuon))}</td><td class="text-end">${esc(fmt(r.so_cuon_cat_le))}</td><td class="text-end">${esc(fmt(r.so_dau))}</td><td class="text-end">${esc(fmt(r.so_cuoi))}</td></tr>`).join('');if(empty){empty.hidden=total>0;empty.querySelector('span').textContent='Chọn mã kế hoạch hoặc nhấn Tìm toàn bộ kế hoạch để xem công việc còn lại.';}if(pag)pag.hidden=total<=PAGE_SIZE;$('#result-summary').textContent=state.showAll?(total?`Đang xem toàn bộ kế hoạch · ${total} dòng công việc`:'Đang xem toàn bộ kế hoạch · Chưa có dữ liệu.'):(total?`${total} dòng công việc`:'Chưa có dữ liệu kế hoạch.');renderPagination(pages);}
 function bindPagination(){$('#mobile-prev')?.addEventListener('click',()=>go(state.page-1));$('#mobile-next')?.addEventListener('click',()=>go(state.page+1));}
 function renderPagination(pages){const h=$('#desktop-pagination');if(h){h.innerHTML='';for(let i=1;i<=pages;i++){const b=document.createElement('button');b.className='page-number'+(i===state.page?' active':'');b.textContent=i;b.onclick=()=>go(i);h.appendChild(b);}}const l=$('#mobile-page-label');if(l)l.textContent=`Trang ${state.page}/${pages}`;}
 function go(p){const pages=Math.max(1,Math.ceil(state.worklist.length/PAGE_SIZE));state.page=Math.min(Math.max(1,p),pages);renderTable();}
@@ -365,6 +365,9 @@ function chooseContext(ctx){
 function bindResultPage(){
     $('#b3-result-back')?.addEventListener('click',()=>closeResultPage());
     $('#b3-cancel-action')?.addEventListener('click',()=>closeResultPage());
+    $('.b3-plan-details summary')?.addEventListener('click',event=>{
+        if($('.b3-plan-details')?.dataset.selectionRequired==='true')event.preventDefault();
+    });
     $$('[data-b3-tab]').forEach(b=>b.addEventListener('click',()=>{
         if(saveInProgress||state.cutSession?.active)return;
         state.action=b.dataset.b3Tab==='whole'?'TAKE_WHOLE_REEL':(state.scan?.source?.source_type==='CUON_LE'?'CUT_PARTIAL_REEL':'CUT_FULL_REEL');
@@ -390,8 +393,10 @@ function bindResultPage(){
 function fitResultViewport(){
     const page=$('#b3-result-page');
     if(!resultPageOpen||!page||!window.visualViewport)return;
-    page.style.height=window.visualViewport.height+'px';
-    page.style.top=window.visualViewport.offsetTop+'px';
+    // Keep the result screen on CSS 100dvh: visualViewport can retain the
+    // keyboard height after confirmation and leave a blank area below the footer.
+    page.style.height='';
+    page.style.top='';
     const dialog=$('#b3-cut-settings-dialog');
     if(dialog){
         dialog.style.height=window.visualViewport.height+'px';
@@ -414,7 +419,7 @@ function showResultPage(raw){
     resultPageOpen=true;
     const app=$('#app-screen');if(app){app.hidden=true;app.inert=true;}
     page.hidden=false;page.inert=false;fitResultViewport();
-    const content=$('.b3-result-scroll',page);if(content)content.scrollTop=0;
+    const content=$('.b3-result-scroll',page);if(content){content.style.paddingBottom='';content.scrollTop=0;}
     renderResultPage();
     if(!$('#b3-cut-settings-dialog'))$('#b3-result-back')?.focus?.();
 }
@@ -443,20 +448,28 @@ function renderResultPage(){
     const src=state.scan?.source;if(!src)return;
     const cutting=state.action&&state.action!=='TAKE_WHOLE_REEL';
     const continueLabel=$('#b3-continue-scan-label');if(continueLabel)continueLabel.hidden=!!cutting;
-    const cancel=$('#b3-cancel-action');if(cancel)cancel.textContent=cutting?'KẾT THÚC CUỘN':'Hủy';
-    const save=$('#b3-save-action');if(save)save.textContent=cutting?'LƯU LẦN CẮT TIẾP':'Lưu';
+    const cancel=$('#b3-cancel-action');if(cancel)cancel.textContent=cutting?'Huỷ':'Hủy';
+    const save=$('#b3-save-action');if(save)save.textContent=cutting?'LƯU và TIẾP':'Lưu';
     const contexts=state.cutSession?.active?[state.context]:(state.scan.candidate_contexts||[]);const scope=$('#b3-plan-scope');
-    if(!state.context && contexts.length>1){
+    const requiresPlanSelection=contexts.length>1||(!state.context&&contexts.length>0);
+    const planDetails=$('.b3-plan-details');
+    if(planDetails){
+        const wasRequired=planDetails.dataset.selectionRequired==='true';
+        planDetails.dataset.selectionRequired=String(requiresPlanSelection);
+        if(requiresPlanSelection||wasRequired)planDetails.open=requiresPlanSelection;
+        planDetails.querySelector('summary')?.setAttribute('aria-disabled',String(requiresPlanSelection));
+    }
+    if(!state.context && contexts.length>0){
         scope.innerHTML=`<select id="b3-plan-select" class="form-select form-select-sm"><option value="">Chọn kế hoạch...</option>${contexts.map((c,i)=>`<option value="${i}">${esc(c.plan.ma_ke_hoach)}${c.item.standard_length?` · ${esc(c.item.standard_length)} m`:``}</option>`).join('')}</select>`;
         $('#b3-product-name').textContent=contexts[0]?.item?.product_name||'';$('#b3-reel-code').textContent=src.source_type==='CUON_CHAN'?(src.ma_bin||src.raw_qr):src.raw_qr;$('#b3-reel-type').textContent=src.source_type==='CUON_CHAN'?'Cuộn chẵn':'Cuộn lẻ';
         $('#b3-plan-select').onchange=e=>{if(e.target.value==='')return;chooseContext(contexts[Number(e.target.value)]);renderResultPage();};
-        $('#b3-tab-whole').hidden=true;$('#b3-tab-cut').hidden=true;$('#b3-tab-content').innerHTML='<section class="b3-operation-panel"><p>Vui lòng chọn phạm vi kế hoạch để tiếp tục.</p></section>';$('#b3-save-action').disabled=true;return;
+        $('#b3-tab-whole').hidden=true;$('#b3-tab-cut').hidden=true;$('#b3-tab-content').innerHTML='<section class="b3-operation-panel"><div class="alert alert-danger mb-0" role="alert">Vui lòng chọn phạm vi kế hoạch để tiếp tục.</div></section>';$('#b3-save-action').disabled=true;return;
     }
     const ctx=state.context;if(!ctx)return;
     if(contexts.length>1){scope.innerHTML=`<select id="b3-plan-select" class="form-select form-select-sm">${contexts.map((c,i)=>`<option value="${i}" ${c===ctx?'selected':''}>${esc(c.plan.ma_ke_hoach)}</option>`).join('')}</select>`;$('#b3-plan-select').onchange=e=>{chooseContext(contexts[Number(e.target.value)]);renderResultPage();};}else scope.innerHTML=`<strong>${esc(ctx.plan.ma_ke_hoach)}</strong>`;
     $('#b3-product-name').textContent=ctx.item.product_name;$('#b3-reel-code').textContent=src.source_type==='CUON_CHAN'?(src.ma_bin||src.raw_qr):src.raw_qr;$('#b3-reel-type').textContent=src.source_type==='CUON_CHAN'?'Cuộn chẵn':'Cuộn lẻ';
     const actions=ctx.available_actions||[];const whole=$('#b3-tab-whole'),cut=$('#b3-tab-cut');whole.hidden=!!state.cutSession?.active||!actions.includes('TAKE_WHOLE_REEL');cut.hidden=!actions.some(a=>a.startsWith('CUT_'));cut.disabled=!!state.cutSession?.active;whole.classList.toggle('active',state.action==='TAKE_WHOLE_REEL');cut.classList.toggle('active',!!state.action&&state.action!=='TAKE_WHOLE_REEL');whole.setAttribute('aria-selected',state.action==='TAKE_WHOLE_REEL'?'true':'false');cut.setAttribute('aria-selected',state.action&&state.action!=='TAKE_WHOLE_REEL'?'true':'false');
-    const host=$('#b3-tab-content');if(!state.action){host.innerHTML='<section class="b3-operation-panel"><p>Vui lòng chọn loại thao tác cần thực hiện.</p></section>';$('#b3-save-action').disabled=true;return;}$('#b3-save-action').disabled=false;if(state.action==='TAKE_WHOLE_REEL')renderWhole(host,ctx);else renderCut(host,ctx,src);
+    const host=$('#b3-tab-content');if(!state.action){host.innerHTML='<section class="b3-operation-panel"><div class="alert alert-warning mb-0" role="alert">Cần chọn <strong>LẤY NGUYÊN CUỘN</strong> hoặc <strong>CHỌN CẮT LẺ</strong> trước</div></section>';$('#b3-save-action').disabled=true;return;}$('#b3-save-action').disabled=false;if(state.action==='TAKE_WHOLE_REEL')renderWhole(host,ctx);else renderCut(host,ctx,src);
 }
 function renderWhole(host,ctx){const left=Math.max(0,ctx.item.whole_required-ctx.item.whole_done);host.innerHTML=`<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">LẤY NGUYÊN CUỘN</span><h3>${esc(ctx.item.product_name)}</h3></div><div class="b3-value-list"><div><span>Chiều dài một cuộn</span><strong>${esc(ctx.item.standard_length)} m</strong></div><div><span>Kế hoạch</span><strong>${ctx.item.whole_required} cuộn</strong></div><div><span>Đã lấy</span><strong>${ctx.item.whole_done} cuộn</strong></div><div><span>Còn lại</span><strong>${left} cuộn</strong></div><div><span>Lần này</span><strong>1 cuộn</strong></div></div></section>`;}
 function cutSourceLength(src){
@@ -471,10 +484,11 @@ function cutSettingsError(endText,directionText,src){
     if(![1,-1].includes(direction))return {field:'b3-direction-select',message:'Vui lòng chọn chiều thuận hoặc chiều nghịch.'};
     const length=cutSourceLength(src);
     if(!Number.isSafeInteger(length)||length<=0)return {field:'b3-end-value-input',message:'Không xác định được chiều dài cuộn. Vui lòng quét lại.'};
-    if(end-direction*length<0)return {field:'b3-end-value-input',message:'Số cuối và chiều không phù hợp với chiều dài cuộn. Vui lòng kiểm tra lại.'};
+    if(end-direction*length<0)return {field:'b3-end-value-input',message:'Số đầu không được nhỏ hơn 0. Vui lòng kiểm tra số cuối và chiều cuộn.'};
     return null;
 }
 function renderCut(host,ctx,src){
+    const reelOpen=host.querySelector?.('.b3-reel-details')?.open??false;
     if(!state.cutParametersConfirmed){
         host.innerHTML='<section class="b3-operation-panel b3-first-cut-waiting" aria-hidden="true"></section>';
         $('#b3-save-action').disabled=true;showCutSettingsDialog();return;
@@ -482,7 +496,7 @@ function renderCut(host,ctx,src){
     const session=state.cutSession;
     const groups=session?.groupId?(ctx.groups||[]).filter(g=>String(g.id)===String(session.groupId)):(ctx.groups||[]);
     if(groups.length>1&&!state.groupId){
-        host.innerHTML='<section class="b3-operation-panel"><label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control"><option value="">Chọn nhóm...</option>'+groups.map(g=>'<option value="'+esc(g.id)+'">'+esc(g.details.filter(d=>!Number(d.done)).map(d=>d.ChieuDaiCanCat).join(';'))+'</option>').join('')+'</select></label><p class="b3-inline-note">Chọn nhóm trước khi chọn chiều dài cần cắt.</p></section>';
+        host.innerHTML='<section class="b3-operation-panel">'+cutSessionSummary(src,reelOpen)+'<label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control"><option value="">Chọn nhóm...</option>'+groups.map(g=>'<option value="'+esc(g.id)+'">'+esc(g.details.filter(d=>!Number(d.done)).map(d=>d.ChieuDaiCanCat).join(';'))+'</option>').join('')+'</select></label><p class="b3-inline-note text-danger">Chọn chiều dài cần cắt trong nhóm.</p></section>';
         $('#b3-group-select').onchange=event=>{if(!event.target.value)return;state.groupId=Number(event.target.value);if(session)session.groupId=state.groupId;state.detailId=null;renderResultPage();};
         $('#b3-save-action').disabled=true;return;
     }
@@ -494,14 +508,33 @@ function renderCut(host,ctx,src){
     const detail=group.details.find(d=>String(d.id)===String(state.detailId));
     const groupSelect=groups.length>1?'<label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control">'+groups.map(g=>'<option value="'+esc(g.id)+'" '+(String(g.id)===String(state.groupId)?'selected':'')+'>'+esc(g.details.filter(d=>!Number(d.done)).map(d=>d.ChieuDaiCanCat).join(';'))+'</option>').join('')+'</select></label>':'';
     const detailSelect='<label class="b3-input-block"><span>Chiều dài cần cắt</span><select id="b3-cut-detail-select" class="form-select app-control">'+group.details.map(d=>'<option value="'+esc(d.id)+'" '+(String(d.id)===String(state.detailId)?'selected':'')+' '+(Number(d.done)||d.selectable===false?'disabled':'')+'>'+esc(d.ChieuDaiCanCat)+' m'+(Number(d.done)?' · Đã thực hiện':d.selectable===false?' · Không đủ chiều dài':'')+'</option>').join('')+'</select></label>';
-    host.innerHTML='<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">CẮT LẺ</span><h3>'+esc(ctx.item.product_name)+'</h3></div>'+cutSessionSummary(src)+'<div class="b3-cut-layout"><div class="b3-cut-main">'+groupSelect+detailSelect+'<div id="b3-cut-preview">'+(detail?previewHtml(src,detail):'')+'</div></div><aside class="b3-cut-side"><section class="b3-detail-list"><h4>Các đoạn trong nhóm</h4><ul>'+group.details.map(d=>'<li class="b3-detail-row '+(Number(d.done)?'is-done':String(d.id)===String(state.detailId)?'is-selected':'')+'"><span>'+(Number(d.done)?'✓':'•')+'</span><span>'+esc(d.ChieuDaiCanCat)+' m</span><small>'+(Number(d.done)?'Đã thực hiện':d.selectable===false?'Không đủ chiều dài':'Chưa thực hiện')+'</small></li>').join('')+'</ul></section></aside></div></section>';
+    host.innerHTML='<section class="b3-operation-panel"><div class="b3-operation-heading"><span class="b3-operation-kicker">CẮT LẺ</span><h3>'+esc(ctx.item.product_name)+'</h3></div>'+cutSessionSummary(src,reelOpen)+'<div class="b3-cut-layout"><div class="b3-cut-main">'+groupSelect+detailSelect+'<div id="b3-cut-preview">'+(detail?previewHtml(src,detail):'')+'</div></div><aside class="b3-cut-side"><section class="b3-detail-list"><h4>Các đoạn trong nhóm</h4><ul>'+group.details.map(d=>'<li class="b3-detail-row '+(Number(d.done)?'is-done':String(d.id)===String(state.detailId)?'is-selected':'')+'"><span>'+(Number(d.done)?'✓':'•')+'</span><span>'+esc(d.ChieuDaiCanCat)+' m</span><small>'+(Number(d.done)?'Đã thực hiện':d.selectable===false?'Không đủ chiều dài':'Chưa thực hiện')+'</small></li>').join('')+'</ul></section></aside></div></section>';
     const preview=detail?Number(state.endValue)-Number(state.direction)*Number(detail.ChieuDaiCanCat):-1;
     $('#b3-save-action').disabled=saveInProgress||!!session?.blocked||!detail||preview<0||!!cutSettingsError(state.endValue,state.direction,src);
     $('#b3-cut-recover')?.addEventListener('click',recoverCutSession);
     $('#b3-cut-retry')?.addEventListener('click',()=>saveCutSession(true));
     if($('#b3-cut-detail-select'))$('#b3-cut-detail-select').disabled=saveInProgress||!!session?.blocked;
     $('#b3-group-select')?.addEventListener('change',event=>{state.groupId=Number(event.target.value);state.detailId=null;renderResultPage();});
-    $('#b3-cut-detail-select')?.addEventListener('change',event=>{state.detailId=Number(event.target.value);renderResultPage();});
+    $('#b3-cut-detail-select')?.addEventListener('change',event=>{state.detailId=Number(event.target.value);renderResultPage();scrollCutPanelIntoView();});
+}
+
+function scrollCutPanelIntoView(){
+    const scroll=$('.b3-result-scroll'),panel=$('#b3-tab-content .b3-operation-panel');
+    if(!scroll||!panel)return;
+    scroll.style.paddingBottom='';
+    const viewport=scroll.getBoundingClientRect(),card=panel.getBoundingClientRect();
+    let top=scroll.scrollTop+card.top-viewport.top-10;
+    const preview=$('#b3-cut-preview .b3-after-cut-card')?.getBoundingClientRect();
+    // On short screens, give the computed result priority over the panel heading.
+    if(preview&&preview.bottom-card.top>viewport.height-20){
+        top=Math.max(top,scroll.scrollTop+preview.bottom-viewport.bottom+10);
+    }
+    if(top>scroll.scrollHeight-scroll.clientHeight){
+        const bottom=scroll.lastElementChild.getBoundingClientRect().bottom-viewport.top+scroll.scrollTop;
+        const padding=parseFloat(getComputedStyle(scroll).paddingBottom);
+        scroll.style.paddingBottom=Math.ceil(Math.max(padding,scroll.clientHeight+top-bottom))+'px';
+    }
+    scroll.scrollTop=Math.max(0,top);
 }
 
 function closeDecisionOverlay(){
@@ -517,7 +550,7 @@ function showCutSettingsDialog(){
     overlay.id='b3-cut-settings-dialog';overlay.className='b3-decision-overlay is-visible';
     overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');
     overlay.setAttribute('aria-labelledby','b3-cut-settings-title');
-    overlay.innerHTML='<section class="b3-decision-card b3-cut-settings-card"><header class="b3-cut-settings-header"><h2 id="b3-cut-settings-title">Xác nhận thông số cuộn</h2><button id="b3-cut-settings-close" type="button" class="b3-cut-settings-close" aria-label="Hủy và quét lại">×</button></header><form id="b3-cut-settings-form" novalidate><label class="b3-input-block"><span>Số cuối</span><input id="b3-end-value-input" type="number" inputmode="numeric" min="0" step="1" required class="form-control app-control" value="'+esc(initialEnd)+'" aria-describedby="b3-cut-settings-error"><small id="b3-cut-settings-error" class="b3-cut-settings-error" role="alert" hidden></small></label><label class="b3-input-block"><span>Chiều</span><select id="b3-direction-select" required class="form-select app-control"><option value="">Chọn chiều...</option><option value="1" '+(initialDirection==='1'?'selected':'')+'>Chiều thuận</option><option value="-1" '+(initialDirection==='-1'?'selected':'')+'>Chiều nghịch</option></select></label><button id="b3-cut-settings-confirm" type="submit" class="btn btn-primary app-primary-button">Xác nhận</button></form></section>';
+    overlay.innerHTML='<section class="b3-decision-card b3-cut-settings-card"><header class="b3-cut-settings-header"><h2 id="b3-cut-settings-title">Xác nhận thông số cuộn</h2><button id="b3-cut-settings-close" type="button" class="b3-cut-settings-close" aria-label="Hủy và quét lại">×</button></header><form id="b3-cut-settings-form" novalidate><label class="b3-input-block"><span>Số cuối</span><input id="b3-end-value-input" type="number" inputmode="numeric" min="0" step="1" required class="form-control app-control" value="'+esc(initialEnd)+'" aria-describedby="b3-cut-settings-error"><small id="b3-cut-settings-error" class="b3-cut-settings-error text-danger" role="alert" hidden></small></label><label class="b3-input-block"><span>Chiều</span><select id="b3-direction-select" required class="form-select app-control"><option value="">Chọn chiều...</option><option value="1" '+(initialDirection==='1'?'selected':'')+'>Chiều thuận</option><option value="-1" '+(initialDirection==='-1'?'selected':'')+'>Chiều nghịch</option></select></label><p id="b3-cut-settings-preview" class="b3-inline-note" role="status" hidden></p><button id="b3-cut-settings-confirm" type="submit" class="btn btn-primary app-primary-button">Xác nhận</button></form></section>';
     document.body.appendChild(overlay);
     fitResultViewport();
     const page=$('#b3-result-page');if(page){page.inert=true;page.classList.add('b3-decision-active');}
@@ -526,8 +559,15 @@ function showCutSettingsDialog(){
     const updateLabel=()=>{
         confirm.textContent=endInput.value!==initialEnd||directionInput.value!==initialDirection?'Cập nhật':'Xác nhận';
         errorHost.hidden=true;endInput.removeAttribute('aria-invalid');directionInput.removeAttribute('aria-invalid');
+        const preview=$('#b3-cut-settings-preview');
+        const ready=endInput.value.trim()!==''&&[1,-1].includes(Number(directionInput.value));
+        const error=ready?cutSettingsError(endInput.value,directionInput.value,src):null;
+        preview.hidden=!ready||!!error;
+        if(ready&&!error)preview.textContent='Số đầu - Số cuối: '+(Number(endInput.value)-Number(directionInput.value)*cutSourceLength(src))+' - '+Number(endInput.value);
+        if(error){errorHost.textContent=error.message;errorHost.hidden=false;$('#'+error.field).setAttribute('aria-invalid','true');}
     };
     endInput.addEventListener('input',updateLabel);directionInput.addEventListener('change',updateLabel);
+    updateLabel();
     $('#b3-cut-settings-form').addEventListener('submit',event=>{
         event.preventDefault();
         const error=cutSettingsError(endInput.value,directionInput.value,src);
@@ -537,7 +577,7 @@ function showCutSettingsDialog(){
             groupId:state.groupId,partialId:src.ton_cuon_le_id??null,cutsSaved:0,countedTokens:[],pending:null,
             blocked:false,retryAllowed:false,lastSaved:null,message:''};
         updateQrControls();
-        closeDecisionOverlay();renderResultPage();
+        closeDecisionOverlay();renderResultPage();scrollCutPanelIntoView();
     });
     const cancel=async()=>{closeResultPage();await openScanner();};
     $('#b3-cut-settings-close').onclick=cancel;
@@ -552,14 +592,14 @@ function showCutSettingsDialog(){
     endInput.focus();
 }
 
-function cutSessionSummary(src){
+function cutSessionSummary(src,open=false){
     const session=state.cutSession;if(!session)return '';
     const length=session.remainingLength??cutSourceLength(src);
     const end=session.currentEnd??Number(state.endValue);
     const start=session.currentStart??(end-Number(state.direction)*length);
     const last=session.lastSaved;
     const recovery=session.blocked?'<div class="b3-cut-recovery" role="status"><p>'+esc(session.message||'Cần tải lại dữ liệu trước khi cắt tiếp.')+'</p><button id="b3-cut-recover" type="button" class="btn btn-outline-secondary">Tải lại dữ liệu</button>'+(session.retryAllowed?'<button id="b3-cut-retry" type="button" class="btn btn-primary">Thử lưu lại lần cắt này</button>':'')+'</div>':'';
-    return '<section class="b3-cut-session" aria-label="Cuộn đang cắt"><div class="b3-session-reel"><span>Mã cuộn</span><strong>'+esc(src.partial?.MaCuon||src.raw_qr)+'</strong></div><div class="b3-session-values"><div><span>Loại cuộn</span><strong>'+(src.source_type==='CUON_LE'?'Cuộn lẻ':'Cuộn chẵn')+'</strong></div><div><span>Chiều</span><strong>'+(Number(state.direction)===1?'Thuận':'Nghịch')+'</strong></div><div><span>Số đầu hiện tại</span><strong id="b3-current-start">'+esc(start)+'</strong></div><div><span>Số cuối hiện tại</span><strong id="b3-current-end">'+esc(end)+'</strong></div><div><span>Chiều dài còn lại</span><strong id="b3-remaining-length">'+esc(length)+' m</strong></div><div><span>Đã cắt trong phiên</span><strong id="b3-session-cut-count">'+session.cutsSaved+' lần</strong></div></div>'+(last?'<p class="b3-last-cut" role="status">Lần lưu gần nhất: '+esc(last.cut_length)+' m · Thành công</p>':'')+recovery+'</section>';
+    return '<details class="b3-raw-qr b3-reel-details"'+(open||session.blocked?' open':'')+'><summary><span>Thông tin cuộn/lô lẻ</span><svg class="b3-disclosure-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><section class="b3-cut-session" aria-label="Cuộn đang cắt"><div class="b3-session-reel"><span>Mã cuộn</span><strong>'+esc(src.partial?.MaCuon||src.raw_qr)+'</strong></div><div class="b3-session-values"><div><span>Loại cuộn</span><strong>'+(src.source_type==='CUON_LE'?'Cuộn lẻ':'Cuộn chẵn')+'</strong></div><div><span>Chiều</span><strong>'+(Number(state.direction)===1?'Thuận':'Nghịch')+'</strong></div><div><span>Số đầu hiện tại</span><strong id="b3-current-start">'+esc(start)+'</strong></div><div><span>Số cuối hiện tại</span><strong id="b3-current-end">'+esc(end)+'</strong></div><div><span>Chiều dài còn lại</span><strong id="b3-remaining-length">'+esc(length)+' m</strong></div><div><span>Đã cắt trong phiên</span><strong id="b3-session-cut-count">'+session.cutsSaved+' lần</strong></div></div>'+(last?'<p class="b3-last-cut" role="status">Lần lưu gần nhất: '+esc(last.cut_length)+' m · Thành công</p>':'')+recovery+'</section></details>';
 }
 function countSavedCut(session,payload,last){
     if(!session.countedTokens.includes(payload.operation_token)){

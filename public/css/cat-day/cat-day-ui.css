@@ -259,7 +259,7 @@ button { touch-action: manipulation; }
     font-size: .9rem;
 }
 .app-table th,
-.app-table td { padding: 12px 14px; border-color: #e8edf3; vertical-align: middle; }
+.app-table td { padding: 12px 14px; border: 1px solid var(--app-border); vertical-align: middle; }
 .app-table thead th {
     position: sticky;
     top: 0;
@@ -273,14 +273,14 @@ button { touch-action: manipulation; }
 }
 .app-table thead th:nth-child(1) { width: 150px; }
 .app-table thead th:nth-child(2) { width: 280px; }
-.app-table thead th:nth-child(3) { width: 170px; }
-.app-table thead th:nth-child(4) { width: 130px; }
+.app-table thead th:nth-child(3) { width: 150px; }
+.app-table thead th:nth-child(4) { width: 170px; }
 .app-table thead th:nth-child(5) { width: 130px; }
-.app-table thead th:nth-child(6) { width: 150px; }
-.app-table thead th:nth-child(7),
-.app-table thead th:nth-child(8) { width: 110px; }
-.app-table thead th:nth-child(9) { width: 150px; }
-.app-table tbody td:nth-child(3) { white-space: nowrap; }
+.app-table thead th:nth-child(6) { width: 130px; }
+.app-table thead th:nth-child(7) { width: 150px; }
+.app-table thead th:nth-child(8),
+.app-table thead th:nth-child(9) { width: 110px; }
+.app-table tbody td:nth-child(4) { white-space: nowrap; }
 .app-table tbody tr:nth-child(even) { background: #fbfdff; }
 .app-table tbody tr:hover { background: #f2f7fd; }
 .b3-status-badge {
@@ -951,11 +951,20 @@ button { touch-action: manipulation; }
     font-size: .82rem;
     font-weight: 500;
 }
+/* Shared disclosure header for plan scope, reel information and scanned QR. */
+.b3-raw-qr > summary { justify-content: space-between; gap: 12px; list-style: none; }
+.b3-raw-qr > summary::-webkit-details-marker { display: none; }
+.b3-disclosure-icon { width: 20px; height: 20px; flex: 0 0 20px; transition: transform .2s ease; }
+.b3-raw-qr[open] > summary .b3-disclosure-icon { transform: rotate(180deg); }
+.b3-reel-details { margin: 0 0 20px; }
+.b3-reel-details > .b3-cut-session { margin: 0; border: 0; border-top: 1px solid #e0e7ef; border-radius: 0 0 9px 9px; }
+@media (prefers-reduced-motion: reduce) { .b3-disclosure-icon { transition: none; } }
 .b3-raw-qr .qr-result-value {
     margin: 0 10px 10px;
     max-height: 90px;
 }
 .b3-plan-details { margin-top: 0; }
+.b3-plan-details[data-selection-required="true"] > summary { cursor: default; }
 .b3-plan-details .b3-context-card {
     border: 0;
     border-top: 1px solid #e0e7ef;
@@ -973,6 +982,12 @@ button { touch-action: manipulation; }
     box-shadow: 0 -8px 22px rgba(31, 54, 80, .07);
     border-radius: 0;
 }
+/* A cut session only needs the action row; keep its footer snug. */
+.b3-result-footer:has(.b3-footer-continuous[hidden]) {
+    gap: 0;
+    padding-top: 6px;
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
 .b3-footer-continuous {
     min-height: 44px;
     display: flex;
@@ -985,6 +1000,7 @@ button { touch-action: manipulation; }
 }
 .b3-footer-actions {
     min-width: min(420px, 48vw);
+    margin-left: auto;
     margin-bottom: 0;
     display: grid;
     grid-template-columns: minmax(110px, .7fr) minmax(160px, 1.3fr);
