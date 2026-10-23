@@ -648,13 +648,57 @@ for(const viewport of [{width:390,height:667},{width:844,height:390},{width:1366
 }
 
 
+for(const hasGroupChoice of [false,true]){
+  test(`keyboard dismissal restores root viewport without a swipe (group choice: ${hasGroupChoice})`,{skip:!chromium,timeout:15000},async()=>{
+    const browser=await chromium.launch({headless:true});
+    try{
+      const {page,errors}=await harness(browser,{width:390,height:844});
+      if(hasGroupChoice)await page.evaluate(()=>window.__context.groups.push({id:20,details:[{id:200,ChieuDaiCanCat:200,done:0,selectable:true}]}));
+      await scan(page);await accept(page);
+      const layout=await page.evaluate(()=>({
+        body:getComputedStyle(document.body).position,
+        shell:getComputedStyle(document.querySelector('.b3-result-shell')).position,
+        focus:document.activeElement.id,
+      }));
+      assert.notEqual(layout.body,'fixed','the document is no longer locked at the old scroll offset');
+      assert.notEqual(layout.shell,'fixed','the result uses normal flow instead of nested native fixed layers');
+      assert.equal(layout.focus,'b3-result-page','focus leaves the removed input and keyboard');
+      // Reproduce a late root scroll from keyboard dismissal. The inner main
+      // scroll must be preserved while the outer page returns to the origin.
+      const shifted=await page.evaluate(()=>{
+        document.body.style.paddingBottom='110px';
+        window.scrollTo(0,110);
+        return window.scrollY;
+      });
+      assert.ok(shifted>0,'the root-scroll regression was actually introduced');
+      await page.evaluate(()=>window.visualViewport.dispatchEvent(new Event('scroll')));
+      await page.waitForFunction(()=>window.scrollY===0);
+      const inner=await page.locator('.b3-result-scroll').evaluate(n=>n.scrollTop);
+      await page.evaluate(()=>window.visualViewport.dispatchEvent(new Event('resize')));
+      assert.equal(await page.locator('.b3-result-scroll').evaluate(n=>n.scrollTop),inner,'viewport recovery preserves inner scrolling');
+      const footer=await page.locator('.b3-result-footer').boundingBox();
+      const scroll=await page.locator('.b3-result-scroll').boundingBox();
+      const button=await page.locator('#b3-save-action').boundingBox();
+      closeTo(footer.y+footer.height,844,'footer reaches viewport bottom without a manual swipe');
+      assert.ok(844-(button.y+button.height)<=8,'no blank region below the buttons');
+      assert.ok(scroll.y+scroll.height<=footer.y+1,'main never overlaps the bottom row');
+      await page.setViewportSize({width:390,height:724});
+      await page.waitForFunction(()=>document.querySelector('#b3-result-page').clientHeight===window.innerHeight);
+      const resized=await page.locator('.b3-result-footer').boundingBox();
+      closeTo(resized.y+resized.height,724,'bottom row follows viewport changes');
+      await screenshot(page,`b3-viewport-bottom-${hasGroupChoice?'group':'cut'}.png`);
+      assert.deepEqual(errors,[]);
+    }finally{await browser.close();}
+  });
+}
+
 test('action buttons stay at the screen bottom after keyboard viewport height becomes stale',{skip:!chromium,timeout:15000},async()=>{
   const browser=await chromium.launch({headless:true});
   try{
     const {page,errors}=await harness(browser,{width:390,height:844});
     await scan(page);await accept(page);
     // Mobile browsers can briefly keep the old keyboard viewport height after
-    // closing the number input. The result screen must follow CSS dynamic vh.
+    // closing the number input. The result screen must follow layout height.
     await page.evaluate(()=>{
       Object.defineProperty(window.visualViewport,'height',{configurable:true,value:window.innerHeight-110});
       window.visualViewport.dispatchEvent(new Event('resize'));
@@ -668,6 +712,7 @@ test('action buttons stay at the screen bottom after keyboard viewport height be
       window.visualViewport.dispatchEvent(new Event('resize'));
     });
     await page.setViewportSize({width:390,height:667});
+    await page.waitForFunction(()=>document.querySelector('#b3-result-page').clientHeight===window.innerHeight);
     const resized=await page.locator('.b3-result-footer').boundingBox();
     closeTo(resized.y+resized.height,667,'footer follows screen resizing');
     await screenshot(page,'b3-footer-bottom-mobile.png');

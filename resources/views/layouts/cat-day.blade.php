@@ -16,7 +16,7 @@
     >
 
     <link rel="stylesheet" href="{{ asset('css/qr-scanner/qr-camera-modal.css') }}">
-    <link rel="stylesheet" href="{{ asset('css/cat-day/cat-day-ui.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/cat-day/cat-day-ui.css') }}?v={{ filemtime(public_path('css/cat-day/cat-day-ui.css')) }}">
     @stack('styles')
 </head>
 <body>
@@ -30,7 +30,7 @@
     <script src="{{ asset('js/qr-scanner/qr-camera-modal.js') }}" defer></script>
     <script src="{{ asset('js/cat-day/b3-api.js') }}" defer></script>
     <script src="{{ asset('js/cat-day/b3-state.js') }}" defer></script>
-    <script src="{{ asset('js/cat-day/cat-day-ui.js') }}" defer></script>
+    <script src="{{ asset('js/cat-day/cat-day-ui.js') }}?v={{ filemtime(public_path('js/cat-day/cat-day-ui.js')) }}" defer></script>
     @stack('scripts')
 </body>
 </html>

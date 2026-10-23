@@ -491,20 +491,22 @@ button { touch-action: manipulation; }
    Thông tin và thao tác sau khi đọc QR.
    -------------------------------------------------------------------------- */
 .b3-result-page[hidden] { display: none !important; }
+body.b3-result-open { min-height: 0; overscroll-behavior: none; }
 .b3-result-page {
-    position: fixed;
-    inset: 0;
+    position: relative;
     z-index: 1100;
-    height: 100vh;
+    width: 100%;
     height: 100dvh;
     background: #fff;
     overflow: hidden;
 }
 .b3-result-shell {
+    /* One normal-flow screen avoids iOS fixed-layer offsets after the keyboard. */
     height: 100%;
     min-height: 0;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: #fff;
 }
 .b3-result-header {
     flex: 0 0 auto;

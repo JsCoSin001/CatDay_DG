@@ -126,9 +126,13 @@ test('loading and failed refreshed worklist cannot use stale results',async()=>{
 });
 
 test('result page locks document scrolling and restores position on close',()=>{
-  const h=harness();h.api.showResultPage('QR1');assert.equal(h.doc.body.style.position,'fixed');
-  assert.equal(h.doc.body.style.top,'-320px');
+  const h=harness();h.api.showResultPage('QR1');
+  assert.equal(h.doc.body.style.position,'','body is not fixed at the old list offset');
+  assert.equal(h.doc.body.style.overflow,'hidden');
+  assert.equal(h.doc.documentElement.style.overflow,'hidden');
+  assert.deepEqual(h.win.lastRestored,[0,0],'the result screen starts at the document origin');
   h.api.closeResultPage();assert.equal(h.doc.body.style.position,'');assert.deepEqual(h.win.lastRestored,[0,320]);
+  assert.equal(h.doc.documentElement.style.overflow,'');
 });
 
 test('scanner cannot open without pending work even if called programmatically',async()=>{

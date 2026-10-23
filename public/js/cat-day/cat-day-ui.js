@@ -5,6 +5,7 @@ const state=window.B3State; const api=window.B3Api; const PAGE_SIZE=10;
 let planRequestVersion=0, worklistRequestVersion=0, planInputRevision=0, planSearchTimer=null, highlightedPlanIndex=-1;
 let planLoadingTimer=null, pageLoadingId=0, saveInProgress=false, scanOpening=false;
 let resultPageOpen=false, resultNavigation=null, scanResolveVersion=0;
+let resultViewportTimer=null;
 let closeQrErrorMessage=null;
 const pageLoadingTasks=new Map();
 function updatePageLoading(){
@@ -387,22 +388,43 @@ function bindResultPage(){
         closeResultPage({fromHistory:true});
     });
     window.addEventListener?.('b3:session-expired',handleSessionExpired);
-    window.visualViewport?.addEventListener('resize',fitResultViewport);
-    window.visualViewport?.addEventListener('scroll',fitResultViewport);
+    window.addEventListener?.('resize',handleResultViewportChange);
+    window.addEventListener?.('scroll',queueResultViewportReset);
+    window.visualViewport?.addEventListener('resize',handleResultViewportChange);
+    window.visualViewport?.addEventListener('scroll',handleResultViewportChange);
 }
 function fitResultViewport(){
     const page=$('#b3-result-page');
-    if(!resultPageOpen||!page||!window.visualViewport)return;
-    // Keep the result screen on CSS 100dvh: visualViewport can retain the
-    // keyboard height after confirmation and leave a blank area below the footer.
-    page.style.height='';
+    if(!resultPageOpen||!page)return;
+    // Keep the result in document flow. The layout viewport is independent of
+    // stale keyboard visualViewport dimensions on iOS.
+    page.style.height=window.innerHeight>0?window.innerHeight+'px':'100dvh';
     page.style.top='';
     const dialog=$('#b3-cut-settings-dialog');
-    if(dialog){
+    if(dialog&&window.visualViewport){
         dialog.style.height=window.visualViewport.height+'px';
         dialog.style.top=window.visualViewport.offsetTop+'px';
         dialog.style.bottom='auto';
     }
+}
+function resetResultViewport(){
+    if(!resultPageOpen||$('#b3-cut-settings-dialog')||window.visualViewport?.scale>1)return;
+    if(document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]'))return;
+    // iOS may pan the native root scroll view even though DOM overflow is hidden.
+    // Reset only the document; preserve the user's scroll inside the result.
+    window.scrollTo?.(0,0);
+    fitResultViewport();
+}
+function queueResultViewportReset(){
+    if(!resultPageOpen||$('#b3-cut-settings-dialog'))return;
+    clearTimeout(resultViewportTimer);
+    resetResultViewport();
+    // A keyboard dismissal can finish after the dialog's DOM has been removed.
+    resultViewportTimer=setTimeout(()=>{resultViewportTimer=null;resetResultViewport();},350);
+}
+function handleResultViewportChange(){
+    fitResultViewport();
+    queueResultViewportReset();
 }
 function showResultPage(raw){
     const page=$('#b3-result-page');if(!page)return;
@@ -411,14 +433,18 @@ function showResultPage(raw){
     $('#b3-continue-scan').checked=!!$('#continuous-scan')?.checked;
     if(!resultPageOpen){
         const style=document.body.style;
-        resultNavigation={x:window.scrollX||0,y:window.scrollY||0,styles:{}};
+        const rootStyle=document.documentElement.style;
+        resultNavigation={x:window.scrollX||0,y:window.scrollY||0,styles:{},rootStyles:{overflow:rootStyle.overflow,overscrollBehavior:rootStyle.overscrollBehavior,scrollBehavior:rootStyle.scrollBehavior}};
         for(const key of ['position','top','left','right','width','overflow'])resultNavigation.styles[key]=style[key];
-        style.position='fixed';style.top=-resultNavigation.y+'px';style.left='0';style.right='0';style.width='100%';style.overflow='hidden';
+        style.overflow='hidden';
+        rootStyle.overflow='hidden';rootStyle.overscrollBehavior='none';rootStyle.scrollBehavior='auto';
+        document.body.classList.add('b3-result-open');
         window.history?.pushState({...(window.history.state||{}),b3ResultPage:true},'');
     }
     resultPageOpen=true;
     const app=$('#app-screen');if(app){app.hidden=true;app.inert=true;}
     page.hidden=false;page.inert=false;fitResultViewport();
+    window.scrollTo?.(0,0);
     const content=$('.b3-result-scroll',page);if(content){content.style.paddingBottom='';content.scrollTop=0;}
     renderResultPage();
     if(!$('#b3-cut-settings-dialog'))$('#b3-result-back')?.focus?.();
@@ -430,10 +456,13 @@ function closeResultPage(options={}){
     }
     closeDecisionOverlay();
     const wasOpen=resultPageOpen;resultPageOpen=false;
+    clearTimeout(resultViewportTimer);resultViewportTimer=null;
     const page=$('#b3-result-page');if(page){page.hidden=true;page.inert=false;page.style.height='';page.style.top='';}
     const app=$('#app-screen');if(app){app.hidden=false;app.inert=false;}
     if(resultNavigation){
+        document.body.classList.remove('b3-result-open');
         Object.assign(document.body.style,resultNavigation.styles);
+        Object.assign(document.documentElement.style,resultNavigation.rootStyles);
         window.scrollTo?.(resultNavigation.x,resultNavigation.y);resultNavigation=null;
     }
     state.scan=null;state.context=null;state.action=null;state.groupId=null;state.detailId=null;
@@ -497,7 +526,7 @@ function renderCut(host,ctx,src){
     const groups=session?.groupId?(ctx.groups||[]).filter(g=>String(g.id)===String(session.groupId)):(ctx.groups||[]);
     if(groups.length>1&&!state.groupId){
         host.innerHTML='<section class="b3-operation-panel">'+cutSessionSummary(src,reelOpen)+'<label class="b3-input-block"><span>Nhóm cần thực hiện</span><select id="b3-group-select" class="form-select app-control"><option value="">Chọn nhóm...</option>'+groups.map(g=>'<option value="'+esc(g.id)+'">'+esc(g.details.filter(d=>!Number(d.done)).map(d=>d.ChieuDaiCanCat).join(';'))+'</option>').join('')+'</select></label><p class="b3-inline-note text-danger">Chọn chiều dài cần cắt trong nhóm.</p></section>';
-        $('#b3-group-select').onchange=event=>{if(!event.target.value)return;state.groupId=Number(event.target.value);if(session)session.groupId=state.groupId;state.detailId=null;renderResultPage();};
+        $('#b3-group-select').onchange=event=>{if(!event.target.value)return;event.target.blur();state.groupId=Number(event.target.value);if(session)session.groupId=state.groupId;state.detailId=null;renderResultPage();resumeResultContent();};
         $('#b3-save-action').disabled=true;return;
     }
     const group=currentGroup();
@@ -514,8 +543,14 @@ function renderCut(host,ctx,src){
     $('#b3-cut-recover')?.addEventListener('click',recoverCutSession);
     $('#b3-cut-retry')?.addEventListener('click',()=>saveCutSession(true));
     if($('#b3-cut-detail-select'))$('#b3-cut-detail-select').disabled=saveInProgress||!!session?.blocked;
-    $('#b3-group-select')?.addEventListener('change',event=>{state.groupId=Number(event.target.value);state.detailId=null;renderResultPage();});
-    $('#b3-cut-detail-select')?.addEventListener('change',event=>{state.detailId=Number(event.target.value);renderResultPage();scrollCutPanelIntoView();});
+    $('#b3-group-select')?.addEventListener('change',event=>{event.target.blur();state.groupId=Number(event.target.value);state.detailId=null;renderResultPage();resumeResultContent();});
+    $('#b3-cut-detail-select')?.addEventListener('change',event=>{event.target.blur();state.detailId=Number(event.target.value);renderResultPage();resumeResultContent();});
+}
+
+function resumeResultContent(){
+    $('#b3-result-page')?.focus?.({preventScroll:true});
+    queueResultViewportReset();
+    scrollCutPanelIntoView();
 }
 
 function scrollCutPanelIntoView(){
@@ -539,7 +574,9 @@ function scrollCutPanelIntoView(){
 
 function closeDecisionOverlay(){
     closeQrErrorMessage?.();
-    $('#b3-cut-settings-dialog')?.remove();
+    const dialog=$('#b3-cut-settings-dialog');
+    if(dialog?.contains?.(document.activeElement))document.activeElement?.blur?.();
+    dialog?.remove();
     const page=$('#b3-result-page');if(page){page.inert=false;page.classList.remove('b3-decision-active');}
 }
 function showCutSettingsDialog(){
@@ -577,7 +614,7 @@ function showCutSettingsDialog(){
             groupId:state.groupId,partialId:src.ton_cuon_le_id??null,cutsSaved:0,countedTokens:[],pending:null,
             blocked:false,retryAllowed:false,lastSaved:null,message:''};
         updateQrControls();
-        closeDecisionOverlay();renderResultPage();scrollCutPanelIntoView();
+        closeDecisionOverlay();renderResultPage();resumeResultContent();
     });
     const cancel=async()=>{closeResultPage();await openScanner();};
     $('#b3-cut-settings-close').onclick=cancel;
