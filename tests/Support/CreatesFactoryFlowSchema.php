@@ -60,6 +60,7 @@ trait CreatesFactoryFlowSchema
         Schema::create('LichSuCat', function (Blueprint $t) {
             $t->increments('id'); $t->unsignedInteger('KeHoachCatChiTiet_ID')->unique(); $t->unsignedInteger('TonCuonLe_ID'); $t->string('LoaiNguon'); $t->integer('ChieuDaiCat');
             $t->integer('SoDauTruoc'); $t->integer('SoCuoiTruoc'); $t->integer('SoDauCat'); $t->integer('SoCuoiCat'); $t->integer('SoDauSau'); $t->integer('SoCuoiSau'); $t->integer('HeSoChieu'); $t->string('MaQuetThucTe'); $t->string('NguoiThucHien'); $t->string('GhiChu')->nullable();
+            $t->text('DieuChinhThongSo')->nullable();
         });
     }
 }

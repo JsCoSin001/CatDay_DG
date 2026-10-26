@@ -103,7 +103,8 @@ class ExecutionService
                 $c=$endValue!==null
                     ? $this->calc->firstCut($actual,$cutLen,$endValue,$direction)
                     : $this->calc->partialCut((int)$p['SoDau'],(int)$p['SoCuoi'],$cutLen);
-                $this->exec->insertCut($this->cutHistory($detailId,(int)$p['id'],'CUON_LE',$cutLen,$c,$source['raw_qr'],$actor->username,$token));
+                $adjustment=$this->markerAdjustment($p,$c,$endValue,$direction);
+                $this->exec->insertCut($this->cutHistory($detailId,(int)$p['id'],'CUON_LE',$cutLen,$c,$source['raw_qr'],$actor->username,$token,$adjustment));
                 $this->exec->updatePartial((int)$p['id'],$c['soDauSau'],$c['soCuoiSau'],$c['remainingLength']===0?'HET':'ACTIVE');
             }
             return $this->resultForPlan($planId, (int) $actor->getAuthIdentifier())
@@ -111,7 +112,29 @@ class ExecutionService
         });
     }
 
-    private function cutHistory(int $detailId,int $partialId,string $kind,int $len,array $c,string $raw,string $user,string $token):array
-    {return ['KeHoachCatChiTiet_ID'=>$detailId,'TonCuonLe_ID'=>$partialId,'LoaiNguon'=>$kind,'ChieuDaiCat'=>$len,'SoDauTruoc'=>$c['soDauTruoc'],'SoCuoiTruoc'=>$c['soCuoiTruoc'],'SoDauCat'=>$c['soDauCat'],'SoCuoiCat'=>$c['soCuoiCat'],'SoDauSau'=>$c['soDauSau'],'SoCuoiSau'=>$c['soCuoiSau'],'HeSoChieu'=>$c['heSoChieu'],'MaQuetThucTe'=>$raw,'NguoiThucHien'=>$user,'GhiChu'=>'__B3_OP__:'.$token];}
+    private function markerAdjustment(array $partial, array $calculation, ?int $endValue, ?int $direction): ?string
+    {
+        if ($endValue === null || $direction === null) return null;
+
+        $start = (int)$partial['SoDau'];
+        $end = (int)$partial['SoCuoi'];
+        $oldDirection = $start < $end ? 1 : -1;
+        $changed = [];
+        if ($endValue !== $end) $changed[] = 'so_cuoi';
+        if ($direction !== $oldDirection) $changed[] = 'chieu';
+        if (!$changed) return null;
+
+        // Preserve the database markers before rebasing; the normal history fields use the confirmed markers.
+        return json_encode([
+            'phien_ban' => 1,
+            'truoc_dieu_chinh' => ['so_dau' => $start, 'so_cuoi' => $end, 'chieu' => $oldDirection],
+            'sau_dieu_chinh' => ['so_dau' => $calculation['soDauTruoc'], 'so_cuoi' => $calculation['soCuoiTruoc'], 'chieu' => $calculation['heSoChieu']],
+            'truong_nguoi_dung_thay_doi' => $changed,
+            'so_dau_tinh_lai' => $start !== $calculation['soDauTruoc'],
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    private function cutHistory(int $detailId,int $partialId,string $kind,int $len,array $c,string $raw,string $user,string $token,?string $markerAdjustment=null):array
+    {return ['KeHoachCatChiTiet_ID'=>$detailId,'TonCuonLe_ID'=>$partialId,'LoaiNguon'=>$kind,'ChieuDaiCat'=>$len,'SoDauTruoc'=>$c['soDauTruoc'],'SoCuoiTruoc'=>$c['soCuoiTruoc'],'SoDauCat'=>$c['soDauCat'],'SoCuoiCat'=>$c['soCuoiCat'],'SoDauSau'=>$c['soDauSau'],'SoCuoiSau'=>$c['soCuoiSau'],'HeSoChieu'=>$c['heSoChieu'],'MaQuetThucTe'=>$raw,'NguoiThucHien'=>$user,'GhiChu'=>'__B3_OP__:'.$token,'DieuChinhThongSo'=>$markerAdjustment];}
     private function resultForPlan(int $planId,int $userId):array{ $state=$this->plans->loadPlanState($planId,$userId); return ['success'=>true,'plan_id'=>$planId,'plan_complete'=>$state['complete'],'worklist'=>$this->worklist->project($state),'plan_state'=>$state]; }
 }
