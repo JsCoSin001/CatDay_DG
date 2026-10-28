@@ -115,6 +115,12 @@ class PartialCutMarkersTest extends TestCase
         $this->assertSame(2, DB::table('LichSuCat')->count());
         $this->assertSame(1, DB::table('TonCuonLe')->count());
         $this->assertSame(1, DB::table('B3QrSuDung')->count());
+        foreach (['/api/b3/plans/1/worklist', '/api/b3/worklist'] as $endpoint) {
+            $rows = collect($this->getJson($endpoint)->assertOk()->json('rows'))->keyBy('detail_id');
+            // Rebasing the second batch cannot rewrite the first segment's saved markers.
+            $this->assertSame([1000, 900], [$rows[60]['so_dau'], $rows[60]['so_cuoi']]);
+            $this->assertSame([1100, 1000], [$rows[61]['so_dau'], $rows[61]['so_cuoi']]);
+        }
     }
 
     public function test_omitting_both_markers_preserves_legacy_forward_cut(): void

@@ -12,6 +12,53 @@ class PlanApiTest extends TestCase
     protected function setUp(): void { parent::setUp(); $this->createFactoryFlowSchema(); DB::table('users')->insert(['user_id'=>1,'username'=>'u','password_hash'=>'x','is_active'=>1]); DB::table('DanhSachMaSP')->insert([['id'=>1,'Ten'=>'SP A','Ma'=>'A'],['id'=>2,'Ten'=>'SP B','Ma'=>'B']]); }
     private function user(): User { return User::query()->findOrFail(1); }
 
+    public static function lotCases(): array
+    {
+        return [
+            'pending whole take' => ['take', false, null],
+            'completed whole take' => ['take', true, null],
+            'pending partial cut' => ['partial', false, 'cuontp;PARTIAL;400;SOURCE'],
+            'completed partial cut' => ['partial', true, 'cuontp;ACTUAL;400;CUT;extra'],
+            'pending full cut' => ['full', false, null],
+            'completed full cut' => ['full', true, 'cuontp;ACTUAL;400;CUT;extra'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('lotCases')]
+    public function test_lot_uses_actual_cut_history_for_selected_and_all_plans(
+        string $kind, bool $done, ?string $expectedLot
+    ): void {
+        DB::table('KeHoach')->insert(['id'=>1,'Users_id'=>1,'MaKeHoach'=>'KH1',
+            'NgayKeHoach'=>'2026-10-23','TrangThai'=>'ACTIVE']);
+        DB::table('KeHoachHang')->insert(['id'=>10,'KeHoach_ID'=>1,'DanhSachMaSP_ID'=>1]);
+        DB::table('KeHoachHangQuyCachCuonChan')->insert(['id'=>100,'KeHoachHang_ID'=>10,
+            'ChieuDai1Cuon'=>400,'SoLuongCuonCanLay'=>$kind==='take'?1:0]);
+        if ($kind === 'take') {
+            if ($done) DB::table('LichSuLayCuon')->insert(['KeHoachHang_ID'=>10,
+                'QuyCachCuonChan_ID'=>100,'TTCuonDay_ID'=>999,'SoLuong'=>1,'NguoiThucHien'=>'u']);
+        } else {
+            DB::table('TonCuonLe')->insert(['id'=>70,'MaCuon'=>'cuontp;PARTIAL;400;SOURCE',
+                'TTThanhPham_ID'=>1,'TTCuonDay_ID'=>999,'SoDau'=>0,'SoCuoi'=>400]);
+            DB::table('KeHoachCatNhom')->insert(['id'=>50,'KeHoachHang_ID'=>10,
+                'QuyCachCuonChan_ID'=>100,'TonCuonLe_ID'=>$kind==='partial'?70:null]);
+            DB::table('KeHoachCatChiTiet')->insert(['id'=>60,'KeHoachCatNhom_ID'=>50,'ChieuDaiCanCat'=>100]);
+            if ($done) DB::table('LichSuCat')->insert(['KeHoachCatChiTiet_ID'=>60,'TonCuonLe_ID'=>70,
+                'LoaiNguon'=>$kind==='partial'?'CUON_LE':'CUON_CHAN','ChieuDaiCat'=>100,
+                'SoDauTruoc'=>0,'SoCuoiTruoc'=>400,'SoDauCat'=>0,'SoCuoiCat'=>100,
+                'SoDauSau'=>100,'SoCuoiSau'=>400,'HeSoChieu'=>1,
+                'MaQuetThucTe'=>'cuontp;ACTUAL;400;CUT;extra','NguoiThucHien'=>'u']);
+        }
+        $this->actingAs($this->user());
+        foreach (['/api/b3/plans/1/worklist', '/api/b3/worklist'] as $endpoint) {
+            $rows=$this->getJson($endpoint)->assertOk()->json('rows');
+            $this->assertCount(1,$rows);
+            $this->assertSame($done,$rows[0]['completed']);
+            $this->assertSame($expectedLot,$rows[0]['lot']);
+            $this->assertSame($done && $kind!=='take'?0:null,$rows[0]['so_dau']);
+            $this->assertSame($done && $kind!=='take'?100:null,$rows[0]['so_cuoi']);
+        }
+    }
+
     public function test_active_plan_returns_grouped_pending_and_completed_specifications(): void
     {
         DB::table('KeHoach')->insert(['id'=>1,'Users_id' => 1, 'MaKeHoach' =>'KH1','NgayKeHoach'=>'2026-10-01','TrangThai'=>'ACTIVE']);
@@ -73,8 +120,8 @@ class PlanApiTest extends TestCase
         $this->assertSame('Đang thực hiện (3/12)', $rows[0]['tinh_trang']);
         $this->assertSame('Đang thực hiện (1/5)', $rows[1]['tinh_trang']);
         $this->assertSame([null, null, 'LE-01', 'LE-02'], array_column($rows, 'lot'));
-        $this->assertSame([null, null, 100, 100], array_column($rows, 'so_dau'));
-        $this->assertSame([null, null, 500, 500], array_column($rows, 'so_cuoi'));
+        $this->assertSame([null, null, null, null], array_column($rows, 'so_dau'));
+        $this->assertSame([null, null, null, null], array_column($rows, 'so_cuoi'));
 
         $allRows = $this->getJson('/api/b3/worklist')->assertOk()->json('rows');
         $this->assertCount(5, $allRows);

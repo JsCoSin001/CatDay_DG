@@ -73,7 +73,9 @@ class PlanRepository
         $details=$groupIds?DB::table('KeHoachCatChiTiet as CT')
             ->leftJoin('LichSuCat as LS','LS.KeHoachCatChiTiet_ID','=','CT.id')
             ->whereIn('CT.KeHoachCatNhom_ID',$groupIds)
-            ->select('CT.id','CT.KeHoachCatNhom_ID','CT.ChieuDaiCanCat',DB::raw('CASE WHEN LS.id IS NULL THEN 0 ELSE 1 END as done'))
+            ->select('CT.id','CT.KeHoachCatNhom_ID','CT.ChieuDaiCanCat','LS.MaQuetThucTe as actual_cut_qr',
+                'LS.SoDauCat as actual_cut_start','LS.SoCuoiCat as actual_cut_end',
+                DB::raw('CASE WHEN LS.id IS NULL THEN 0 ELSE 1 END as done'))
             ->orderBy('CT.id')->get():collect();
         $partialIds=$groups->pluck('TonCuonLe_ID')->filter()->unique()->values()->all();
         $partials=$partialIds?DB::table('TonCuonLe')->whereIn('id',$partialIds)->get()->keyBy('id'):collect();
@@ -101,7 +103,10 @@ class PlanRepository
                         if($qid!==null && (int)($g->QuyCachCuonChan_ID??0)!==$qid) continue;
                         if($qid===null && $g->QuyCachCuonChan_ID!==null) continue;
                         $ds=collect($detailsByGroup[$g->id]??[])->map(fn($d)=>[
-                            'id'=>(int)$d->id,'ChieuDaiCanCat'=>(int)$d->ChieuDaiCanCat,'done'=>(int)$d->done])->all();
+                            'id'=>(int)$d->id,'ChieuDaiCanCat'=>(int)$d->ChieuDaiCanCat,'done'=>(int)$d->done,
+                            'actual_cut_qr'=>$d->actual_cut_qr,
+                            'actual_cut_start'=>$d->actual_cut_start===null?null:(int)$d->actual_cut_start,
+                            'actual_cut_end'=>$d->actual_cut_end===null?null:(int)$d->actual_cut_end])->all();
                         $cutReq+=count($ds);$cutDone+=count(array_filter($ds,fn($d)=>$d['done']===1));
                         $partial=$g->TonCuonLe_ID&&isset($partials[$g->TonCuonLe_ID])?(array)$partials[$g->TonCuonLe_ID]:null;
                         $groupStates[]=['id'=>(int)$g->id,'quy_cach_id'=>$qid,

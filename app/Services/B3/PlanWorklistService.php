@@ -30,14 +30,15 @@ class PlanWorklistService
                         'group_id'=>$g['id'],'detail_id'=>$detail['id'],
                         'chieu_dai_lay'=>(int)$detail['ChieuDaiCanCat'],
                         'so_cuon_cat_le'=>1,'completed'=>$completed,
+                        'lot'=>$completed?($detail['actual_cut_qr']??null):null,
+                        'so_dau'=>$completed?($detail['actual_cut_start']??null):null,
+                        'so_cuoi'=>$completed?($detail['actual_cut_end']??null):null,
                     ];
                     if($partialId!==null){
                         $t=$g['partial']??[];
                         $extra['ton_cuon_le_id']=$partialId;
                         if(!$completed){
                             $extra['lot']=$t['MaCuon']??null;
-                            $extra['so_dau']=$t['SoDau']??null;
-                            $extra['so_cuoi']=$t['SoCuoi']??null;
                         }
                     }
                     $rows[]=$this->row($type,$p,$item,$completed?'Đã thực hiện':$status,$extra);

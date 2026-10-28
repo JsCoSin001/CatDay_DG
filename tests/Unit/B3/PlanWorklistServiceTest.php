@@ -65,8 +65,8 @@ class PlanWorklistServiceTest extends TestCase
         $this->assertSame(['FULL_TAKE', 'PARTIAL_CUT', 'PARTIAL_CUT'], array_column($rows, 'row_type'));
         $this->assertSame([12, null, null], array_column($rows, 'so_luong_cuon'));
         $this->assertSame([null, 1, 1], array_column($rows, 'so_cuon_cat_le'));
-        $this->assertSame([null, 100, 100], array_column($rows, 'so_dau'));
-        $this->assertSame([null, 500, 500], array_column($rows, 'so_cuoi'));
+        $this->assertSame([null, null, null], array_column($rows, 'so_dau'));
+        $this->assertSame([null, null, null], array_column($rows, 'so_cuoi'));
         $this->assertSame([null, 'LE-01', 'LE-02'], array_column($rows, 'lot'));
     }
 

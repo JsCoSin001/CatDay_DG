@@ -78,6 +78,51 @@ class ContinuousCutSessionTest extends TestCase
             'partial reverse' => [true, -1, 500, [600, 750, 800]]];
     }
 
+    public static function worklistMarkerCases(): array
+    {
+        return [
+            'full forward' => [false, 1, 1000],
+            'partial forward' => [true, 1, 1000],
+            'full reverse from zero' => [false, -1, 0],
+            'partial reverse from zero' => [true, -1, 0],
+        ];
+    }
+
+    #[DataProvider('worklistMarkerCases')]
+    public function test_worklist_retains_each_actual_cut_range_across_separate_batches(
+        bool $partial, int $direction, int $end
+    ): void {
+        if ($partial) $this->existingPartial($end - $direction * 500, $end);
+        $expected = [];
+        // Cut 150m before 100m: display order must never determine physical markers.
+        foreach ([61 => 150, 60 => 100, 62 => 50] as $detail => $length) {
+            $state = $this->scan(); // Resume from a fresh scan for each batch.
+            $nextEnd = $end - $direction * $length;
+            $expected[$detail] = [$end, $nextEnd];
+            $payload = $this->payload($state, $detail, count($expected) === 1
+                ? ['end_value' => $end, 'direction' => $direction] : []);
+            $saved = $this->postJson('/api/b3/execute/cut', $payload)->assertOk()->json('worklist');
+            $lists = [$saved];
+            foreach (['/api/b3/plans/1/worklist', '/api/b3/worklist'] as $endpoint) {
+                $lists[] = $this->getJson($endpoint)->assertOk()->json('rows');
+            }
+            foreach ($lists as $rows) {
+                foreach ($rows as $row) {
+                    if (!$row['completed']) {
+                        $this->assertNull($row['so_dau']);
+                        $this->assertNull($row['so_cuoi']);
+                    }
+                }
+                $byDetail = collect($rows)->where('row_type', 'CUT_DONE')->keyBy('detail_id');
+                foreach ($expected as $doneDetail => [$start, $finish]) {
+                    $this->assertSame($start, $byDetail[$doneDetail]['so_dau']);
+                    $this->assertSame($finish, $byDetail[$doneDetail]['so_cuoi']);
+                }
+            }
+            $end = $nextEnd;
+        }
+    }
+
     #[DataProvider('startingReels')]
     public function test_three_cuts_use_database_markers_distinct_tokens_and_one_partial(bool $partial, int $direction, int $end, array $ends): void
     {
