@@ -168,8 +168,95 @@ function alertUser(type,msg){
     }
 }
 
-function showLogin(){++scanResolveVersion;popupClearAll();closeResultPage({force:true});state.user=null;updateQrControls();$('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');}
-function showApp(user){popupClearAll();state.user=user;updateQrControls();$('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');$('#desktop-account-name').textContent=user.name||user.username;}
+let passwordDialogOpener=null, passwordDialogBusy=false, logoutInProgress=false, passwordDialogPreviousOverflow='';
+
+function closeMobileMenu(){
+    const menu=$('#mobile-menu'), button=$('#mobile-menu-button');
+    if(menu)menu.hidden=true;
+    if(button){button.setAttribute('aria-expanded','false');button.setAttribute('aria-label','Mở menu');}
+}
+function toggleMobileMenu(){
+    const menu=$('#mobile-menu'), button=$('#mobile-menu-button');
+    if(!menu||!button)return;
+    const willOpen=menu.hidden;
+    menu.hidden=!willOpen;
+    button.setAttribute('aria-expanded',String(willOpen));
+    button.setAttribute('aria-label',willOpen?'Đóng menu':'Mở menu');
+}
+function passwordError(message){
+    const error=$('#password-change-error');
+    if(error){error.textContent=message||'';error.hidden=!message;}
+}
+function passwordFormBusy(busy){
+    passwordDialogBusy=busy;
+    const form=$('#password-change-form');
+    if(form)$$('input, button',form).forEach(control=>{control.disabled=busy;});
+    if($('#password-dialog-close'))$('#password-dialog-close').disabled=busy;
+}
+function closePasswordDialog({force=false,restoreFocus=true}={}){
+    if(passwordDialogBusy&&!force)return;
+    const dialog=$('#password-dialog');
+    if(!dialog||dialog.hidden)return;
+    dialog.hidden=true;
+    const app=$('#app-screen');if(app)app.inert=false;
+    document.body.style.overflow=passwordDialogPreviousOverflow;
+    $('#password-change-form')?.reset();
+    passwordError('');
+    passwordFormBusy(false);
+    if(restoreFocus)passwordDialogOpener?.focus?.({preventScroll:true});
+    passwordDialogOpener=null;
+}
+function openPasswordDialog(opener){
+    closeMobileMenu();
+    if(!state.user)return;
+    const dialog=$('#password-dialog');if(!dialog||!dialog.hidden)return;
+    passwordDialogOpener=$('#mobile-menu')?.contains(opener)?$('#mobile-menu-button'):opener;
+    $('#password-change-form')?.reset();
+    passwordError('');
+    passwordFormBusy(false);
+    passwordDialogPreviousOverflow=document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    dialog.hidden=false;
+    const app=$('#app-screen');if(app)app.inert=true;
+    $('#password-current')?.focus();
+}
+async function submitPasswordChange(event){
+    event.preventDefault();
+    if(passwordDialogBusy||!state.user)return;
+    const current=$('#password-current')?.value||'';
+    const next=$('#password-new')?.value||'';
+    const confirmed=$('#password-confirm')?.value||'';
+    if(!current){passwordError('Vui lòng nhập mật khẩu hiện tại.');$('#password-current')?.focus();return;}
+    if(next.length<8||next.length>72){passwordError('Mật khẩu mới cần từ 8 đến 72 ký tự.');$('#password-new')?.focus();return;}
+    if(next!==confirmed){passwordError('Xác nhận mật khẩu mới không khớp.');$('#password-confirm')?.focus();return;}
+    if(next===current){passwordError('Mật khẩu mới phải khác mật khẩu hiện tại.');$('#password-new')?.focus();return;}
+    const version=scanResolveVersion;
+    passwordError('');passwordFormBusy(true);
+    try{
+        const response=await api.changePassword(current,next,confirmed);
+        if(version!==scanResolveVersion||!state.user)return;
+        closePasswordDialog({force:true});
+        alertUser('success',response.message||'Đổi mật khẩu thành công.');
+    }catch(error){
+        if(version!==scanResolveVersion||!state.user||isSessionError(error))return;
+        passwordError(error.message||'Không thể đổi mật khẩu. Vui lòng thử lại.');
+    }finally{
+        passwordFormBusy(false);
+    }
+}
+function showLogin(){
+    ++scanResolveVersion;
+    closeMobileMenu();closePasswordDialog({force:true,restoreFocus:false});
+    const password=$('#login-password');if(password)password.value='';
+    popupClearAll();closeResultPage({force:true});state.user=null;updateQrControls();
+    $('#login-screen')?.classList.remove('d-none');$('#app-screen')?.classList.add('d-none');
+}
+function showApp(user){
+    closeMobileMenu();closePasswordDialog({force:true,restoreFocus:false});
+    popupClearAll();state.user=user;updateQrControls();
+    $('#login-screen')?.classList.add('d-none');$('#app-screen')?.classList.remove('d-none');
+    const label=$('#desktop-account-name');if(label)label.textContent=user.name||user.username;
+}
 function bindLogin(){const f=$('#login-form');if(!f)return;f.addEventListener('submit',async e=>{e.preventDefault();++scanResolveVersion;await withPageLoading('Đang đăng nhập...',async()=>{try{const r=await api.login($('#login-username').value.trim(),$('#login-password').value);showApp(r.user);resetPlanScope();}catch(err){alertUser('danger',err.message);}},'auth');});}
 function resetPlanScope(){
     clearTimeout(planSearchTimer);planRequestVersion++;worklistRequestVersion++;scanResolveVersion++;
@@ -177,7 +264,43 @@ function resetPlanScope(){
     state.worklistReady=false;state.worklistLoading=false;state.planInputDirty=false;updateQrControls();
     const input=$('#plan-search');if(input)input.value='';closePlanOptions();renderTable();
 }
-function bindAccount(){$$('[data-action="logout"]').forEach(b=>b.addEventListener('click',async()=>withPageLoading('Đang đăng xuất...',async()=>{try{await api.logout();}finally{resetPlanScope();showLogin();}},'auth')));}
+function bindAccount(){
+    const menuButton=$('#mobile-menu-button'),menu=$('#mobile-menu'),wrap=$('.mobile-menu-wrap');
+    menuButton?.addEventListener('click',event=>{event.stopPropagation();toggleMobileMenu();});
+    document.addEventListener('click',event=>{if(wrap&&!wrap.contains(event.target))closeMobileMenu();});
+    document.addEventListener('keydown',event=>{
+        if(event.key==='Escape'&&$('#password-dialog')&&!$('#password-dialog').hidden){
+            event.preventDefault();closePasswordDialog();return;
+        }
+        if(event.key==='Escape'&&menu&&!menu.hidden){
+            event.preventDefault();closeMobileMenu();menuButton?.focus();
+        }
+    });
+    $$('[data-action="change-password"]').forEach(button=>button.addEventListener('click',()=>openPasswordDialog(button)));
+    $('#password-dialog-close')?.addEventListener('click',()=>closePasswordDialog());
+    $('#password-dialog-cancel')?.addEventListener('click',()=>closePasswordDialog());
+    $('#password-change-form')?.addEventListener('submit',submitPasswordChange);
+    $('#password-change-form')?.addEventListener('input',()=>passwordError(''));
+    $('#password-dialog')?.addEventListener('keydown',event=>{
+        if(event.key!=='Tab')return;
+        const controls=$$('input:not([disabled]), button:not([disabled])',$('#password-dialog'));
+        if(!controls.length)return;
+        const first=controls[0],last=controls[controls.length-1];
+        if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    });
+    $$('[data-action="logout"]').forEach(button=>button.addEventListener('click',async()=>{
+        if(logoutInProgress)return;
+        logoutInProgress=true;closeMobileMenu();
+        try{
+            await withPageLoading('Đang đăng xuất...',async()=>{
+                await api.logout();
+                resetPlanScope();showLogin();
+            },'auth');
+        }catch(error){if(!isSessionError(error))alertUser('danger',error.message||'Đăng xuất thất bại. Vui lòng thử lại.');}
+        finally{logoutInProgress=false;}
+    }));
+}
 function closePlanOptions(){hidePlanLoading();const host=$('#plan-options');if(host)host.hidden=true;const input=$('#plan-search');if(input){input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant');}highlightedPlanIndex=-1;}
 function restorePlanInput(){const input=$('#plan-search');if(input)input.value=state.showAll?'':(state.selectedPlan?.ma_ke_hoach||'');state.planInputDirty=false;updateQrControls();closePlanOptions();}
 async function refreshPlans(q,selectExact=false){

@@ -10,6 +10,8 @@ Route::get('/', B3PageController::class)->name('b3.page');
 Route::get('/b3', B3PageController::class)->name('b3.page.explicit');
 Route::post('/login',[AuthController::class,'login'])->middleware('throttle:10,1');
 Route::post('/logout',[AuthController::class,'logout'])->middleware('auth');
+Route::post('/api/account/password', [AuthController::class, 'changePassword'])
+    ->middleware(['auth', 'active.user', 'throttle:5,1']);
 Route::get('/api/b3/session',[AuthController::class,'status'])->middleware(['b3.request-id','auth','active.user']);
 Route::middleware(['b3.request-id','auth','active.user'])->group(function(){
  Route::get('/api/b3/plans',[PlanController::class,'index']);

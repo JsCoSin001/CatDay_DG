@@ -17,7 +17,7 @@
         });
         let body = {};
         try { body = await response.json(); } catch (_) {}
-        const authChanged = response.ok && body.success !== false && (url === '/login' || url === '/logout');
+        const authChanged = response.ok && body.success !== false && (url === '/login' || url === '/logout' || url === '/api/account/password');
         if (authChanged) authGeneration++;
         syncCsrf(response, body, authChanged ? authGeneration : generation);
         if (!response.ok || body.success === false) {
@@ -57,6 +57,11 @@
             return jsonPost('/login',{username,password});
         },
         logout: () => jsonPost('/logout',{}),
+        changePassword: (currentPassword, newPassword, confirmation) => jsonPost('/api/account/password', {
+            current_password: currentPassword,
+            new_password: newPassword,
+            new_password_confirmation: confirmation,
+        }),
         plans: (q='') => request('/api/b3/plans?q='+encodeURIComponent(q)),
         worklist: (planId) => request('/api/b3/plans/'+encodeURIComponent(planId)+'/worklist'),
         allWorklist: () => request('/api/b3/worklist'),

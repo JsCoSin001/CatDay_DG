@@ -139,7 +139,7 @@ button { touch-action: manipulation; }
     top: calc(100% + 4px);
     right: 0;
     z-index: 1050;
-    min-width: 150px;
+    min-width: 190px;
     padding: 6px;
     border: 1px solid var(--app-border);
     border-radius: 9px;
@@ -157,7 +157,41 @@ button { touch-action: manipulation; }
     color: #b42318;
     font-weight: 700;
 }
-.mobile-menu button:active { background: #fff1f0; }
+.mobile-menu button[data-action="change-password"] { color: #263f62; }
+.mobile-menu button:hover, .mobile-menu button:focus-visible { background: #edf3f9; }
+.mobile-menu button[data-action="logout"]:hover,
+.mobile-menu button[data-action="logout"]:focus-visible { background: #fff1f0; }
+.mobile-menu-button:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
+
+/* Account password dialog: responsive and scrollable even with a mobile keyboard open. */
+.password-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    overflow-y: auto;
+    padding: max(16px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom));
+    background: rgba(17, 33, 54, .56);
+}
+.password-dialog-backdrop[hidden] { display: none; }
+.password-dialog-card {
+    width: min(100%, 440px);
+    max-height: 100%;
+    overflow-y: auto;
+    padding: clamp(20px, 5vw, 28px);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 20px 55px rgba(0, 0, 0, .23);
+}
+.password-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.password-dialog-heading h2 { margin: 0; font-size: 1.3rem; font-weight: 800; }
+.password-dialog-close { width: 40px; height: 40px; border: 0; border-radius: 8px; background: transparent; font-size: 1.75rem; }
+.password-dialog-close:hover { background: #edf3f9; }
+.password-dialog-help { margin: 8px 0 20px; color: var(--app-muted); font-size: .9rem; }
+.password-change-error { margin: 0 0 12px; color: #b42318; font-size: .91rem; font-weight: 600; }
+.password-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.password-dialog-actions .btn { min-height: 44px; }
 
 /* Main cards */
 .app-main { padding-top: 18px; padding-bottom: 30px; }

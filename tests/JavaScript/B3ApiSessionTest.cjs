@@ -70,6 +70,31 @@ test('login synchronizes before posting then uses the rotated token until logout
   assert.equal(h.calls[5].options.headers['X-CSRF-TOKEN'], 'next-login-token');
 });
 
+
+test('password change posts credentials securely, rotates CSRF token and keeps the login', async () => {
+  const h = harness([
+    {body: {success: true, csrf_token: 'changed-token', message: 'Đổi mật khẩu thành công.'}},
+    {},
+  ]);
+  await h.api.changePassword('current-case', 'new-Password!1', 'new-Password!1');
+  assert.equal(h.calls[0].url, '/api/account/password');
+  assert.equal(h.calls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(h.calls[0].options.body), {
+    current_password:'current-case',new_password:'new-Password!1',new_password_confirmation:'new-Password!1',
+  });
+  assert.equal(h.meta.content, 'changed-token');
+  await h.api.plans();
+  assert.equal(h.calls[1].options.headers['X-CSRF-TOKEN'], 'changed-token');
+  assert.equal(h.events.length, 0);
+});
+
+test('failed password change never retries or rotates CSRF, and reports the backend error', async () => {
+  const h = harness([{status:422, body: {success:false,error_code:'PASSWORD_CURRENT_INVALID',message:'Mật khẩu hiện tại không đúng.'}}]);
+  await assert.rejects(h.api.changePassword('wrong','new-Password!1','new-Password!1'),
+    error=>error.code==='PASSWORD_CURRENT_INVALID'&&error.status===422);
+  assert.equal(h.calls.length,1);
+  assert.equal(h.meta.content,'page-token');
+});
 test('419 synchronizes the token and rejects without resending a write or expiring authentication', async () => {
   const h = harness([{status: 419, token: 'current-token', body: {
     success: false, error_code: 'CSRF_TOKEN_MISMATCH', message: 'Phiên bảo mật đã thay đổi. Vui lòng thử lại.',

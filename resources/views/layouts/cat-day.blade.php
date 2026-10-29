@@ -28,7 +28,7 @@
     <script src="{{ asset('js/qr-scanner/qr-image-decoder.js') }}" defer></script>
     <script src="{{ asset('js/qr-scanner/qr-camera-scanner.js') }}" defer></script>
     <script src="{{ asset('js/qr-scanner/qr-camera-modal.js') }}" defer></script>
-    <script src="{{ asset('js/cat-day/b3-api.js') }}" defer></script>
+    <script src="{{ asset('js/cat-day/b3-api.js') }}?v={{ filemtime(public_path('js/cat-day/b3-api.js')) }}" defer></script>
     <script src="{{ asset('js/cat-day/b3-state.js') }}" defer></script>
     <script src="{{ asset('js/cat-day/cat-day-ui.js') }}?v={{ filemtime(public_path('js/cat-day/cat-day-ui.js')) }}" defer></script>
     @stack('scripts')

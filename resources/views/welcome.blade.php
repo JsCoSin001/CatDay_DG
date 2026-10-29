@@ -51,6 +51,7 @@
 
                 <div class="desktop-account">
                     <span class="account-name" id="desktop-account-name">Người dùng</span>
+                    <button type="button" class="logout-link" data-action="change-password">Đổi mật khẩu</button>
                     <button type="button" class="logout-link" data-action="logout">Đăng xuất</button>
                 </div>
 
@@ -66,6 +67,7 @@
                         <span aria-hidden="true">⋮</span>
                     </button>
                     <div id="mobile-menu" class="mobile-menu" hidden>
+                        <button type="button" data-action="change-password">Đổi mật khẩu</button>
                         <button type="button" data-action="logout">Đăng xuất</button>
                     </div>
                 </div>
@@ -180,6 +182,35 @@
             </nav>
         </section>
     </main>
+</div>
+
+<div id="password-dialog" class="password-dialog-backdrop" hidden>
+    <section class="password-dialog-card" role="dialog" aria-modal="true" aria-labelledby="password-dialog-title" aria-describedby="password-dialog-help">
+        <div class="password-dialog-heading">
+            <h2 id="password-dialog-title">Đổi mật khẩu</h2>
+            <button type="button" id="password-dialog-close" class="password-dialog-close" aria-label="Đóng cửa sổ đổi mật khẩu">×</button>
+        </div>
+        <p id="password-dialog-help" class="password-dialog-help">Mật khẩu mới cần từ 8 đến 72 ký tự, khác mật khẩu hiện tại.</p>
+        <form id="password-change-form" autocomplete="off" novalidate>
+            <div class="mb-3">
+                <label class="form-label app-label" for="password-current">Mật khẩu hiện tại</label>
+                <input id="password-current" class="form-control app-control" type="password" autocomplete="current-password" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label app-label" for="password-new">Mật khẩu mới</label>
+                <input id="password-new" class="form-control app-control" type="password" autocomplete="new-password" minlength="8" maxlength="72" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label app-label" for="password-confirm">Nhập lại mật khẩu mới</label>
+                <input id="password-confirm" class="form-control app-control" type="password" autocomplete="new-password" minlength="8" maxlength="72" required>
+            </div>
+            <p id="password-change-error" class="password-change-error" role="alert" hidden></p>
+            <div class="password-dialog-actions">
+                <button type="button" id="password-dialog-cancel" class="btn btn-outline-secondary">Hủy</button>
+                <button type="submit" id="password-dialog-save" class="btn btn-primary app-primary-button">Lưu mật khẩu</button>
+            </div>
+        </form>
+    </section>
 </div>
 
 <section id="b3-result-page" class="b3-result-page" hidden role="region" aria-labelledby="qr-result-title" tabindex="-1">
