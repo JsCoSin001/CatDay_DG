@@ -5,6 +5,8 @@ namespace App\Services\B3;
 use App\Models\User;
 use App\Repositories\B3\ExecutionRepository;
 use App\Repositories\B3\PlanRepository;
+use App\Repositories\B3\OperationLedgerRepository;
+use App\Repositories\B3\ExecutionRevisionRepository;
 use App\Support\B3\B3Exception;
 use App\Support\B3\B3Transaction;
 use Illuminate\Support\Facades\DB;
@@ -17,11 +19,14 @@ class CutSessionService
         private PlanRepository $plans,
         private ExecutionRepository $exec,
         private B3Transaction $tx,
+        private OperationLedgerRepository $ledger,
+        private ExecutionRevisionRepository $revisions,
     ) {}
 
     public function version(array $source): string
     {
         $state = [$source['raw_qr'], $source['source_type'], $source['product_id']];
+        $state[]=$this->revisions->sourceRevision($source);
         if ($source['source_type'] === 'CUON_LE') {
             $p = $source['partial'];
             $state[] = [(int)$p['id'], (int)$p['TTThanhPham_ID'], (int)$p['TTCuonDay_ID'],
@@ -62,10 +67,11 @@ class CutSessionService
         }
         if (!$item || !$group) throw B3Exception::make('STALE_DATA', 'Nhóm cắt không còn thuộc kế hoạch đang thực hiện.', 409);
 
+        $origin = $token ? $this->ledger->assertNotCancelled($token) : null;
         $last = $token ? $this->exec->cutOperation($token) : null;
         if ($last && ((int)$last['KeHoachCatChiTiet_ID'] !== $detailId
             || (int)$last['KeHoachCatNhom_ID'] !== $groupId
-            || $last['NguoiThucHien'] !== $actor->username || $last['MaQuetThucTe'] !== trim($raw))) {
+            || ($origin['NguoiGuiGoc']??$last['NguoiThucHien']) !== $actor->username || $last['MaQuetThucTe'] !== trim($raw))) {
             throw B3Exception::make('DUPLICATE_REQUEST', 'Mã giao dịch không thuộc thao tác cắt đang kiểm tra.', 409);
         }
         if ($token && !$last && $this->exec->operationExists($token)) {

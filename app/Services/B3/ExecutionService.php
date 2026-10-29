@@ -6,6 +6,7 @@ use App\Repositories\B3\ExecutionRepository;
 use App\Repositories\B3\InventoryRepository;
 use App\Repositories\B3\PlanRepository;
 use App\Repositories\B3\QrUsageRepository;
+use App\Repositories\B3\OperationLedgerRepository;
 use App\Support\B3\B3Exception;
 use App\Support\B3\B3Transaction;
 
@@ -21,13 +22,14 @@ class ExecutionService
         private CutCalculator $calc,
         private PlanWorklistService $worklist,
         private CutSessionService $cutSession,
+        private OperationLedgerRepository $ledger,
     ) {}
 
     public function takeWhole(string $rawQr,int $planId,int $itemId,int $quyCachId,string $token,User $actor):array
     {
         return $this->tx->run(function() use($rawQr,$planId,$itemId,$quyCachId,$token,$actor){
             $this->plans->assertOwnedBy($planId, (int) $actor->getAuthIdentifier());
-            if($this->exec->operationExists($token)) throw B3Exception::make('DUPLICATE_REQUEST','Thao tác này đã được ghi nhận trước đó.',409);
+            $this->ledger->assertUnused($token);
             // Allocate only within the scanned MaBin segment and QR length.
             $source=$this->qr->resolve($rawQr, true);
             if($source['source_type']!=='CUON_CHAN') throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
@@ -51,6 +53,8 @@ class ExecutionService
             $this->qrUsage->ensureUnused($source['raw_qr']);
             $historyId=$this->exec->insertWhole($itemId,(int)$fifo['id'],$quyCachId,$actor->username,$token);
             $this->qrUsage->markWholeTaken($source['raw_qr'],$historyId,$actor->username);
+            $this->recordOperation('TAKE',$historyId,$planId,$itemId,$token,$actor,
+                ['version'=>1,'source'=>$fifo,'reel'=>null,'group'=>null]);
             return $this->resultForPlan($planId, (int) $actor->getAuthIdentifier());
         });
     }
@@ -59,11 +63,12 @@ class ExecutionService
     {
         return $this->tx->run(function() use($rawQr,$planId,$itemId,$groupId,$detailId,$endValue,$direction,$token,$actor,$sourceVersion,$expectedCutLength){
             $this->plans->assertOwnedBy($planId, (int) $actor->getAuthIdentifier());
-            if($this->exec->operationExists($token)) throw B3Exception::make('DUPLICATE_REQUEST','Thao tác này đã được ghi nhận trước đó.',409);
+            $this->ledger->assertUnused($token);
             $source=$this->qr->resolve($rawQr);
             $this->cutSession->assertVersion($sourceVersion,$source);
             $item=$this->plans->item($itemId); $plan=$this->plans->planForItem($itemId); $group=$this->plans->group($groupId); $detail=$this->plans->detail($detailId);
             if(!$item||!$plan||!$group||!$detail) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
+            $before=['version'=>1,'reel'=>$source['partial']??null,'group'=>$group];
             if((int)$plan['id']!==$planId) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
             if($plan['TrangThai']!=='ACTIVE' || (int)$group['KeHoachHang_ID']!==$itemId || (int)$detail['KeHoachCatNhom_ID']!==$groupId || (int)$item['DanhSachMaSP_ID']!==$source['product_id']) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
             if(\Illuminate\Support\Facades\DB::table('LichSuCat')->where('KeHoachCatChiTiet_ID',$detailId)->exists()) throw B3Exception::make('DETAIL_ALREADY_DONE','Nội dung cắt này đã được thực hiện.',409);
@@ -92,7 +97,7 @@ class ExecutionService
                 $partialId=$this->exec->createPartial(['MaCuon'=>$source['raw_qr'],'TTThanhPham_ID'=>(int)$fifo['tt_thanh_pham_id'],'TTCuonDay_ID'=>(int)$fifo['id'],'SoDau'=>$c['soDauSau'],'SoCuoi'=>$c['soCuoiSau'],'TrangThai'=>$c['remainingLength']===0?'HET':'ACTIVE','GhiChu'=>null]);
                 $this->qrUsage->markConverted($source['raw_qr'],$partialId,$actor->username);
                 if($this->exec->bindGroup($groupId,$partialId)!==1) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
-                $this->exec->insertCut($this->cutHistory($detailId,$partialId,'CUON_CHAN',$cutLen,$c,$source['raw_qr'],$actor->username,$token));
+                $historyId=$this->exec->insertCut($this->cutHistory($detailId,$partialId,'CUON_CHAN',$cutLen,$c,$source['raw_qr'],$actor->username,$token));
             } else {
                 if((int)($group['TonCuonLe_ID']??0)!==(int)$source['ton_cuon_le_id']) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
                 if(($endValue===null)!==($direction===null)) throw B3Exception::make('CUT_INPUT_INVALID','Dữ liệu cắt không hợp lệ.');
@@ -104,12 +109,30 @@ class ExecutionService
                     ? $this->calc->firstCut($actual,$cutLen,$endValue,$direction)
                     : $this->calc->partialCut((int)$p['SoDau'],(int)$p['SoCuoi'],$cutLen);
                 $adjustment=$this->markerAdjustment($p,$c,$endValue,$direction);
-                $this->exec->insertCut($this->cutHistory($detailId,(int)$p['id'],'CUON_LE',$cutLen,$c,$source['raw_qr'],$actor->username,$token,$adjustment));
+                $historyId=$this->exec->insertCut($this->cutHistory($detailId,(int)$p['id'],'CUON_LE',$cutLen,$c,$source['raw_qr'],$actor->username,$token,$adjustment));
                 $this->exec->updatePartial((int)$p['id'],$c['soDauSau'],$c['soCuoiSau'],$c['remainingLength']===0?'HET':'ACTIVE');
             }
+            $this->recordOperation('CUT',$historyId,$planId,$itemId,$token,$actor,$before);
             return $this->resultForPlan($planId, (int) $actor->getAuthIdentifier())
                 + ['cut_session'=>$this->cutSession->state($rawQr,$planId,$itemId,$groupId,$actor,$token,$detailId)];
         });
+    }
+
+    private function recordOperation(string $kind,int $historyId,int $planId,int $itemId,string $token,User $actor,array $before): void
+    {
+        $table=$kind==='CUT'?'LichSuCat':'LichSuLayCuon';
+        $history=(array)\Illuminate\Support\Facades\DB::table($table)->where('id',$historyId)->first();
+        $reel=$kind==='CUT'?(array)\Illuminate\Support\Facades\DB::table('TonCuonLe')->where('id',$history['TonCuonLe_ID'])->first():null;
+        $group=$kind==='CUT'?$this->plans->group((int)$before['group']['id']):null;
+        $this->ledger->record([
+            'MaThaoTac'=>$token,'Loai'=>$kind,'LichSu_ID'=>$historyId,'KeHoach_ID'=>$planId,'KeHoachHang_ID'=>$itemId,
+            'TonCuonLe_ID'=>$reel['id']??null,'TTCuonDay_ID'=>$reel['TTCuonDay_ID']??$history['TTCuonDay_ID'],
+            'QuyCachCuonChan_ID'=>$group['QuyCachCuonChan_ID']??$history['QuyCachCuonChan_ID']??null,
+            'RawQr'=>$kind==='CUT'?$history['MaQuetThucTe']:(string)\Illuminate\Support\Facades\DB::table('B3QrSuDung')->where('LichSuLayCuon_ID',$historyId)->value('RawQr'),
+            'NguoiGuiGoc_ID'=>(int)$actor->getAuthIdentifier(),'NguoiGuiGoc'=>$actor->username,
+            'TruocJson'=>json_encode($before,JSON_THROW_ON_ERROR),
+            'SauJson'=>json_encode(['version'=>1,'history'=>$history,'reel'=>$reel,'group'=>$group],JSON_THROW_ON_ERROR),
+        ]);
     }
 
     private function markerAdjustment(array $partial, array $calculation, ?int $endValue, ?int $direction): ?string
