@@ -104,7 +104,7 @@ class QrMaBinSegmentFlowTest extends TestCase
     public static function invalidQrShapes(): array
     {
         return [
-            ['other;264772;200;T'], ['cuontp;;200;T'], ['cuontp;264772'],
+            ['cuontp;;200;T'], ['cuontp;264772'],
             ['cuontp;264772;;T'], ['cuontp;264772;0;T'], ['cuontp;264772;-200;T'],
             ['cuontp;264772;200.5;T'], ['cuontp;264772;2147483648;T'],
         ];
@@ -114,6 +114,12 @@ class QrMaBinSegmentFlowTest extends TestCase
     public function test_invalid_required_fields_are_rejected(string $qr): void
     {
         $this->scan($qr)->assertStatus(422)->assertJsonPath('error_code', 'QR_INVALID_FORMAT');
+    }
+
+    public function test_non_cuontp_with_valid_partial_key_but_no_match_returns_404(): void
+    {
+        $this->scan('other;264772;200;T')
+            ->assertStatus(404)->assertJsonPath('error_code', 'QR_SOURCE_NOT_FOUND');
     }
 
     public function test_matching_is_delimited_and_never_uses_full_mabin_as_a_legacy_fallback(): void

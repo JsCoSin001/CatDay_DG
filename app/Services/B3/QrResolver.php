@@ -25,11 +25,31 @@ class QrResolver
         return ['kind'=>'PLAIN','raw'=>$raw,'ma_bin'=>null];
     }
 
+    /**
+     * Ordinary partial-reel QR codes use only the first semicolon-delimited field
+     * as TonCuonLe.MaCuon. A cuontp QR must retain its complete identity because
+     * an initially full reel is stored under its original QR after the first cut.
+     */
+    public function partialLookupKey(string $rawQr): string
+    {
+        $raw = trim($rawQr);
+        if ($raw === '') throw B3Exception::make('QR_INVALID_FORMAT', 'Mã QR không đúng định dạng.');
+
+        $separator = strpos($raw, ';');
+        if ($separator === false) return $raw;
+
+        $first = trim(substr($raw, 0, $separator));
+        if ($first === '') throw B3Exception::make('QR_INVALID_FORMAT', 'Mã QR không đúng định dạng.');
+
+        return strcasecmp($first, 'cuontp') === 0 ? $raw : $first;
+    }
+
     public function resolve(string $rawQr, bool $allowExhaustedFull = false, bool $allowFinishedPartial = false): array
     {
         $raw=trim($rawQr);
         if($raw==='') throw B3Exception::make('QR_INVALID_FORMAT','Mã QR không đúng định dạng.');
-        $partial=$this->inventory->partialByExactCode($raw);
+        $partialKey=$this->partialLookupKey($raw);
+        $partial=$this->inventory->partialByExactCode($partialKey);
         if($partial){
             $sourceSoDau = $partial['source_so_dau'] ?? null;
             $sourceSoCuoi = $partial['source_so_cuoi'] ?? null;
@@ -49,6 +69,13 @@ class QrResolver
             }
             return ['source_type'=>'CUON_LE','raw_qr'=>$raw,'ma_bin'=>$partial['ma_bin']??null,'product_id'=>(int)$partial['product_id'],'tt_thanh_pham_id'=>(int)$partial['TTThanhPham_ID'],'ton_cuon_le_id'=>(int)$partial['id'],'partial'=>$partial];
         }
+        // Ordinary partial-reel QR: a valid first field with no matching reel is
+        // a missing source (404), not a malformed structured QR (422).
+        // For cuontp QRs, partialLookupKey returns the full QR unchanged;
+        // retain the original structured-QR validation and full-reel fallback.
+        if ($partialKey !== $raw) {
+            throw B3Exception::make('QR_SOURCE_NOT_FOUND', 'Không tìm thấy cuộn lẻ có mã '.$partialKey.'.', 404);
+        }
         $parsed=$this->parse($raw);
         // A whole-taken QR must never be accepted again, even if stock is still positive.
         if(\Illuminate\Support\Facades\DB::table('B3QrSuDung')->where('RawQr',$raw)->where('TrangThai','DA_LAY_NGUYEN')->exists())
@@ -57,7 +84,7 @@ class QrResolver
             throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này đã chuyển lẻ và không còn khả dụng.',409);
         if($parsed['kind']==='PLAIN'){
             if($this->inventory->fullByMaBin($parsed['raw'])) throw B3Exception::make('PLAIN_QR_IS_FULL_REEL','Mã quét không hợp lệ cho cuộn chẵn.');
-            throw B3Exception::make('QR_SOURCE_NOT_FOUND','Không tìm thấy dữ liệu nhập kho phù hợp với mã quét.',404);
+            throw B3Exception::make('QR_SOURCE_NOT_FOUND','Không tìm thấy cuộn lẻ có mã '.$partialKey.'.',404);
         }
         $matches=$this->inventory->fullMaBinsByCode($parsed['ma_bin']);
         if(!$matches) throw B3Exception::make('QR_SOURCE_NOT_FOUND','Không tìm thấy dữ liệu nhập kho phù hợp với mã quét.',404);

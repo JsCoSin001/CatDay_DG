@@ -101,7 +101,9 @@ class ExecutionService
             } else {
                 if((int)($group['TonCuonLe_ID']??0)!==(int)$source['ton_cuon_le_id']) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
                 if(($endValue===null)!==($direction===null)) throw B3Exception::make('CUT_INPUT_INVALID','Dữ liệu cắt không hợp lệ.');
-                $p=$this->inventory->partialByExactCode($source['raw_qr']); if(!$p) throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này không còn khả dụng để thực hiện.',409);
+                // Look up the stored reel identity, not the scanned QR suffix.
+                // The resolver already mapped ordinary QR prefixes to TonCuonLe.MaCuon.
+                $p=$this->inventory->partialByExactCode($source['partial']['MaCuon']); if(!$p) throw B3Exception::make('QR_SOURCE_NOT_USABLE','Cuộn này không còn khả dụng để thực hiện.',409);
                 $actual=abs((int)$p['SoCuoi']-(int)$p['SoDau']); $reserved=$this->inventory->partialReservedLength((int)$p['id']);
                 if($reserved>$actual) throw B3Exception::make('STALE_DATA','Dữ liệu đã thay đổi. Vui lòng quét lại để cập nhật.',409);
                 // Rebase edited markers using the actual remaining length; marker edits cannot add stock.
